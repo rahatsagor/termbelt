@@ -2,6 +2,7 @@
 """Drive the real executable inside a PTY, including terminal capability replies."""
 import fcntl
 import argparse
+import http.server
 import os
 import pathlib
 import pty
@@ -12,6 +13,7 @@ import struct
 import subprocess
 import tempfile
 import termios
+import threading
 import time
 
 root = pathlib.Path(__file__).resolve().parent.parent
@@ -29,6 +31,9 @@ if arguments.plain:
 process = subprocess.Popen(command, stdin=slave, stdout=slave, stderr=slave, env=environment, start_new_session=True)
 os.close(slave)
 captured = bytearray()
+request_started = threading.Event()
+release_response = threading.Event()
+cancel_server = None
 
 def observe(seconds=0.6):
     end = time.monotonic() + seconds
@@ -88,11 +93,34 @@ try:
     print("PASS multiline paste -> JSON workbench", flush=True)
     send(b"\x1b")
     send(b"\x1b")
-    send(b"speed")
-    send(b"\r")
-    send(b"\x12", 0.25)
+    # Hold a local request open until Esc; live providers can fail before a timed cancellation.
+    class SlowHTTPHandler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            request_started.set()
+            release_response.wait(10)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+            except OSError:
+                pass  # The cancellation closes the client connection.
+
+        def log_message(self, format, *args):
+            pass
+
+    cancel_server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SlowHTTPHandler)
+    cancel_server.daemon_threads = True
+    threading.Thread(target=cancel_server.serve_forever, daemon=True).start()
+    local_url = f"http://127.0.0.1:{cancel_server.server_port}/"
+    send(b"http inspector")
+    opened = send(b"\r")
+    assert "HTTP inspector" in opened and "ctrl+r run" in opened, "HTTP form not opened"
+    send(b"\x1b[200~" + local_url.encode() + b"\x1b[201~")
+    send(b"\x12", 0.05)
+    assert request_started.wait(5), "local cancellation request did not start"
     cancelled = send(b"\x1b")
-    assert "Seconds per direction" in cancelled, "cancel did not return to form"
+    assert local_url in cancelled and "ctrl+r run" in cancelled, "cancel did not return to form"
     print("PASS running task cancellation", flush=True)
     send(b"\x03", 0.5)
     process.wait(timeout=5)
@@ -108,5 +136,9 @@ finally:
     if process.poll() is None:
         process.send_signal(signal.SIGTERM)
         process.wait(timeout=5)
+    release_response.set()
+    if cancel_server is not None:
+        cancel_server.shutdown()
+        cancel_server.server_close()
     os.close(master)
     temporary.cleanup()
