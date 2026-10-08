@@ -14,6 +14,7 @@ function run(command, args, options = {}) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} exited with ${result.status}`);
 }
+run(process.execPath, ["scripts/notices.cjs", "--check"]);
 if (!currentOnly) rmSync(join(root, "dist"), { recursive: true, force: true });
 mkdirSync(join(root, "build"), { recursive: true });
 const checksumLines = [];
@@ -35,13 +36,13 @@ for (const platform of currentOnly ? [current()] : platforms) {
   mkdirSync(join(directory, "bin"), { recursive: true });
   copyFileSync(output, join(directory, "bin", executable(platform)));
   if (platform.os !== "win32") chmodSync(join(directory, "bin", executable(platform)), 0o755);
-  copyFileSync(join(root, "LICENSE"), join(directory, "LICENSE"));
+  for (const file of ["LICENSE", "THIRD_PARTY_NOTICES"]) copyFileSync(join(root, file), join(directory, file));
   writeFileSync(join(directory, "README.md"), `# ${packageName(platform)}\n\nNative ${platform.os}/${platform.cpu} executable for [Termbelt](https://github.com/rahatsagor/termbelt). Installed automatically by the \`termbelt\` package.\n`);
   writeFileSync(join(directory, "package.json"), JSON.stringify({
     name: packageName(platform), version: metadata.version,
     description: `Termbelt native executable for ${platform.os}/${platform.cpu}`,
     license: metadata.license, repository: metadata.repository,
-    os: [platform.os], cpu: [platform.cpu], files: ["bin", "LICENSE", "README.md"],
+    os: [platform.os], cpu: [platform.cpu], files: ["bin", "LICENSE", "README.md", "THIRD_PARTY_NOTICES"],
     publishConfig: metadata.publishConfig,
   }, null, 2) + "\n");
 }

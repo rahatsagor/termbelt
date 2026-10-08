@@ -1,6 +1,6 @@
 {
   "name": "termbelt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Your daily developer tool belt. One terminal, fewer tabs.",
   "license": "MIT",
   "author": "Rahat Sagor",
@@ -19,7 +19,8 @@
     "npm/termbelt.cjs",
     "npm/platforms.cjs",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
   ],
   "engines": {
     "node": ">=22.15.0"
@@ -39,12 +40,12 @@
     "registry": "https://registry.npmjs.org"
   },
   "optionalDependencies": {
-    "@rahatsagor/termbelt-darwin-arm64": "1.0.0",
-    "@rahatsagor/termbelt-darwin-x64": "1.0.0",
-    "@rahatsagor/termbelt-linux-arm64": "1.0.0",
-    "@rahatsagor/termbelt-linux-x64": "1.0.0",
-    "@rahatsagor/termbelt-win32-arm64": "1.0.0",
-    "@rahatsagor/termbelt-win32-x64": "1.0.0"
+    "@rahatsagor/termbelt-darwin-arm64": "1.0.1",
+    "@rahatsagor/termbelt-darwin-x64": "1.0.1",
+    "@rahatsagor/termbelt-linux-arm64": "1.0.1",
+    "@rahatsagor/termbelt-linux-x64": "1.0.1",
+    "@rahatsagor/termbelt-win32-arm64": "1.0.1",
+    "@rahatsagor/termbelt-win32-x64": "1.0.1"
   },
   "scripts": {
     "build": "bun scripts/build.cjs --current",
@@ -56,7 +57,8 @@
     "smoke": "python3 scripts/smoke.py --binary build/termbelt",
     "edge-smoke": "python3 scripts/edge_smoke.py --binary build/termbelt",
     "vuln": "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...",
-    "publish": "bun scripts/publish.cjs"
+    "publish": "bun scripts/publish.cjs",
+    "notices": "bun scripts/notices.cjs"
   },
   "keywords": [
     "cli",

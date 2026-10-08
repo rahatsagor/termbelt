@@ -151,6 +151,7 @@ make vuln                       # Current Go vulnerability database scan
 make live-smoke                 # Real provider / DNS / TLS / speed checks
 python3 scripts/tui_smoke.py --binary build/termbelt # PTY interaction checks on Unix
 make install                    # ~/.local/bin/termbelt; add ~/.local/bin to PATH
+bun run notices                 # Refresh bundled notices after dependency updates
 bun run build:release           # Six native binaries, platform packages, archives
 bun run pack                    # Verify and pack npm tarballs
 bun run test:package            # Isolated installs and Node/Bun launcher checks
@@ -160,4 +161,4 @@ Override the install directory with `make install PREFIX=/another/bin`. The buil
 
 ## License
 
-[MIT](LICENSE). Bundled registry snapshots come from [IANA's RDAP bootstrap](https://data.iana.org/rdap/dns.json) and [root-zone TLD list](https://data.iana.org/TLD/tlds-alpha-by-domain.txt).
+[MIT](LICENSE). Native archives and npm packages include dependency licenses in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES). Builds verify these notices against the dependencies compiled for all six platforms. Bundled registry snapshots come from [IANA's RDAP bootstrap](https://data.iana.org/rdap/dns.json) and [root-zone TLD list](https://data.iana.org/TLD/tlds-alpha-by-domain.txt).

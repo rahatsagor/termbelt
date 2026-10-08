@@ -41,7 +41,7 @@ function verify(currentOnly = false) {
   assert.match(metadata.version, /^\d+\.\d+\.\d+$/);
   assert.equal(metadata.license, "MIT");
   for (const name of ["preinstall", "install", "postinstall", "prepare"]) assert(!metadata.scripts?.[name], `install lifecycle script is not allowed: ${name}`);
-  assert.deepEqual(metadata.files, ["npm/termbelt.cjs", "npm/platforms.cjs", "README.md", "LICENSE"]);
+  assert.deepEqual(metadata.files, ["npm/termbelt.cjs", "npm/platforms.cjs", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"]);
   assert(!metadata.dependencies && !metadata.devDependencies, "unexpected JavaScript dependencies");
   assert.deepEqual(Object.keys(metadata.optionalDependencies).sort(), platforms.map(packageName).sort());
   if (process.env.GITHUB_REF_TYPE === "tag") assert.equal(process.env.GITHUB_REF_NAME, `v${metadata.version}`, "tag and package version differ");
@@ -57,6 +57,8 @@ function verify(currentOnly = false) {
     const manifest = JSON.parse(readFileSync(join(directory, "package.json")));
     assert.equal(manifest.name, name);
     assert.equal(manifest.version, metadata.version);
+    assert.deepEqual(manifest.files, ["bin", "LICENSE", "README.md", "THIRD_PARTY_NOTICES"]);
+    for (const file of ["LICENSE", "THIRD_PARTY_NOTICES"]) assert.equal(checksum(readFileSync(join(directory, file))), checksum(readFileSync(join(root, file))), "native package notice differs");
     assert.deepEqual(manifest.os, [platform.os]);
     assert.deepEqual(manifest.cpu, [platform.cpu]);
     assert(!manifest.scripts && !manifest.dependencies && !manifest.optionalDependencies);

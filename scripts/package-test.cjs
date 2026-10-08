@@ -77,7 +77,7 @@ async function main() {
   console.log("PASS clean Bun install downloads only launcher and current native package; no install scripts");
   const installed = join(temporary, "node_modules", "termbelt", "npm", "termbelt.cjs");
   const packageRoot = join(temporary, "node_modules", "termbelt");
-  assert.deepEqual(readdirSync(packageRoot).sort(), ["LICENSE", "README.md", "npm", "package.json"]);
+  assert.deepEqual(readdirSync(packageRoot).sort(), ["LICENSE", "README.md", "THIRD_PARTY_NOTICES", "npm", "package.json"]);
   assert.deepEqual(readdirSync(join(packageRoot, "npm")).sort(), ["platforms.cjs", "termbelt.cjs"]);
   for (const runtime of [process.execPath, process.env.NODE_BINARY || "node"]) {
     assert.equal(success(await run(runtime, [installed, "--version"], { env: environment })).trim(), `termbelt version ${metadata.version}`);
@@ -100,6 +100,7 @@ async function main() {
     }
   }
   const nativeDirectory = join(temporary, "node_modules", "@rahatsagor", `termbelt-${platform.os}-${platform.cpu}`);
+  for (const directory of [packageRoot, nativeDirectory]) assert.equal(readFileSync(join(directory, "THIRD_PARTY_NOTICES"), "utf8"), readFileSync(join(root, "THIRD_PARTY_NOTICES"), "utf8"));
   const manifestPath = join(nativeDirectory, "package.json");
   const originalManifest = readFileSync(manifestPath);
   writeFileSync(manifestPath, JSON.stringify({ ...JSON.parse(originalManifest), version: "0.0.0" }));

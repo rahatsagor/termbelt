@@ -18,7 +18,7 @@ const destination = join(root, "dist", "packages");
 mkdirSync(destination, { recursive: true });
 const main = join(root, "dist", "npm", "termbelt");
 mkdirSync(join(main, "npm"), { recursive: true });
-for (const file of ["README.md", "LICENSE", "npm/termbelt.cjs", "npm/platforms.cjs"]) copyFileSync(join(root, file), join(main, file));
+for (const file of ["README.md", "LICENSE", "THIRD_PARTY_NOTICES", "npm/termbelt.cjs", "npm/platforms.cjs"]) copyFileSync(join(root, file), join(main, file));
 chmodSync(join(main, "npm", "termbelt.cjs"), 0o755);
 const metadata = { ...require("../package.json") };
 delete metadata.scripts;

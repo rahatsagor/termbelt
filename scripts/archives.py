@@ -15,7 +15,7 @@ if sys.argv[1] == "--verify":
         windows = native.suffix == ".exe"
         stem = native.name.removesuffix(".exe").replace("termbelt_", f"termbelt_{version}_", 1)
         destination = root / "dist/releases" / (stem + (".zip" if windows else ".tar.gz"))
-        expected = {"termbelt.exe" if windows else "termbelt": native.read_bytes(), "LICENSE": (root / "LICENSE").read_bytes(), "README.md": (root / "README.md").read_bytes()}
+        expected = {"termbelt.exe" if windows else "termbelt": native.read_bytes(), "LICENSE": (root / "LICENSE").read_bytes(), "README.md": (root / "README.md").read_bytes(), "THIRD_PARTY_NOTICES": (root / "THIRD_PARTY_NOTICES").read_bytes()}
         if windows:
             with zipfile.ZipFile(destination) as archive:
                 assert sorted(archive.namelist()) == sorted(expected), "unexpected release ZIP contents"
@@ -36,7 +36,7 @@ output.mkdir(parents=True, exist_ok=True)
 checksums = []
 for native in sorted((root / "dist/native").glob("termbelt_*")):
     windows = native.suffix == ".exe"
-    files = [(native, "termbelt.exe" if windows else "termbelt"), (root / "LICENSE", "LICENSE"), (root / "README.md", "README.md")]
+    files = [(native, "termbelt.exe" if windows else "termbelt"), (root / "LICENSE", "LICENSE"), (root / "README.md", "README.md"), (root / "THIRD_PARTY_NOTICES", "THIRD_PARTY_NOTICES")]
     stem = native.name.removesuffix(".exe").replace("termbelt_", f"termbelt_{version}_", 1)
     destination = output / (stem + (".zip" if windows else ".tar.gz"))
     if windows:
