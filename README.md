@@ -4,18 +4,18 @@
 
 ## Install
 
-With Node.js 22.15 or later:
-
-```sh
-npm install -g termbelt
-termbelt
-```
-
-Or run it directly with Bun 1.4.2 or later:
+Run it directly with Bun 1.4.2 or later:
 
 ```sh
 bunx --bun termbelt
 bunx --bun termbelt ip
+```
+
+Or install globally with Node.js 22.15 or later:
+
+```sh
+npm install -g termbelt
+termbelt
 ```
 
 Both use the npm registry. Only the native package for your operating system and CPU is installed; no install scripts or additional downloads are required. Keep optional dependencies enabled. `bun add -g termbelt` also installs the command; its Node shebang requires Node when invoked directly, so Bun-only installations should use `bunx --bun`.
@@ -156,7 +156,7 @@ bun run pack                    # Verify and pack npm tarballs
 bun run test:package            # Isolated installs and Node/Bun launcher checks
 ```
 
-Override the install directory with `make install PREFIX=/another/bin`. The build embeds timezone and initial IANA registry metadata. CI tests the native executable and package installation on macOS, Linux, and Windows. The release workflow builds all artifacts from the tagged source, publishes platform packages before the launcher, and uses npm trusted publishing with provenance. All seven npm packages must configure the same trusted GitHub workflow before automated publication.
+Override the install directory with `make install PREFIX=/another/bin`. The build embeds timezone and initial IANA registry metadata. CI tests the native executable and package installation on macOS, Linux, and Windows. The release workflow builds all artifacts from the tagged source, publishes platform packages before the launcher, and uses npm trusted publishing with provenance. CI invokes the pinned npm OIDC client through `bunx`. All seven npm packages must configure the same trusted GitHub workflow before automated publication. An initial authenticated publication can use `bun run publish`; retries verify already published tarball integrity before continuing.
 
 ## License
 

@@ -4,16 +4,40 @@
   "description": "Your daily developer tool belt. One terminal, fewer tabs.",
   "license": "MIT",
   "author": "Rahat Sagor",
-  "repository": { "type": "git", "url": "git+https://github.com/rahatsagor/termbelt.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rahatsagor/termbelt.git"
+  },
   "homepage": "https://github.com/rahatsagor/termbelt#readme",
-  "bugs": { "url": "https://github.com/rahatsagor/termbelt/issues" },
-  "bin": { "termbelt": "npm/termbelt.cjs" },
-  "files": ["npm/termbelt.cjs", "npm/platforms.cjs", "README.md", "LICENSE"],
-  "engines": { "node": ">=22.15.0" },
-  "os": ["darwin", "linux", "win32"],
-  "cpu": ["x64", "arm64"],
+  "bugs": {
+    "url": "https://github.com/rahatsagor/termbelt/issues"
+  },
+  "bin": {
+    "termbelt": "npm/termbelt.cjs"
+  },
+  "files": [
+    "npm/termbelt.cjs",
+    "npm/platforms.cjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "packageManager": "bun@1.4.2",
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org" },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "optionalDependencies": {
     "@rahatsagor/termbelt-darwin-arm64": "1.0.0",
     "@rahatsagor/termbelt-darwin-x64": "1.0.0",
@@ -31,7 +55,21 @@
     "verify": "bun scripts/verify.cjs",
     "smoke": "python3 scripts/smoke.py --binary build/termbelt",
     "edge-smoke": "python3 scripts/edge_smoke.py --binary build/termbelt",
-    "vuln": "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./..."
+    "vuln": "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...",
+    "publish": "bun scripts/publish.cjs"
   },
-  "keywords": ["cli", "tui", "developer-tools", "terminal", "speed-test", "ip", "whois", "rdap", "dns", "json", "go", "toolbelt"]
+  "keywords": [
+    "cli",
+    "tui",
+    "developer-tools",
+    "terminal",
+    "speed-test",
+    "ip",
+    "whois",
+    "rdap",
+    "dns",
+    "json",
+    "go",
+    "toolbelt"
+  ]
 }

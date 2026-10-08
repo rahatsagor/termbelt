@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: stable
+          go-version: '1.27.1'
           cache: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -39,13 +39,7 @@ jobs:
       - run: bun run pack
       - run: bun run test:package
       - name: Publish platform packages, then the launcher
-        shell: bash
-        run: |
-          # npm is the OIDC registry client; development and packing use Bun.
-          for package in dist/packages/rahatsagor-termbelt-*.tgz; do
-            npm publish "$package" --access public --provenance
-          done
-          npm publish dist/packages/termbelt-*.tgz --access public --provenance
+        run: bun scripts/publish.cjs --ci
       - name: Publish native release archives
         shell: bash
         env:

@@ -51,7 +51,8 @@ function verify(currentOnly = false) {
     const native = join(root, "dist", "native", binaryName(platform));
     const data = readFileSync(native);
     architecture(data, platform);
-    if (platform.os !== "win32") assert(statSync(native).mode & 0o111, "native binary lacks executable permission");
+    // Windows filesystems do not expose POSIX permission bits; archive modes are checked separately.
+    if (process.platform !== "win32" && platform.os !== "win32") assert(statSync(native).mode & 0o111, "native binary lacks executable permission");
     const directory = join(root, "dist", "npm", `termbelt-${platform.os}-${platform.cpu}`);
     const manifest = JSON.parse(readFileSync(join(directory, "package.json")));
     assert.equal(manifest.name, name);
