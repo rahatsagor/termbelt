@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'rahatsagor/termbelt'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.2'
+      - run: bun run check
+      - run: bun run vuln
+      - run: bun run build:release
+      - run: bun run pack
+      - run: bun run test:package
+      - name: Publish platform packages, then the launcher
+        shell: bash
+        run: |
+          # npm is the OIDC registry client; development and packing use Bun.
+          for package in dist/packages/rahatsagor-termbelt-*.tgz; do
+            npm publish "$package" --access public --provenance
+          done
+          npm publish dist/packages/termbelt-*.tgz --access public --provenance
+      - name: Publish native release archives
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/releases/* --verify-tag --generate-notes --title "Termbelt $RELEASE_TAG"

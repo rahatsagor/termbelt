@@ -1,0 +1,10 @@
+/build/
+/dist/
+/node_modules/
+/.cache/
+/termbelt
+/termbelt.exe
+*.tgz
+*.test
+*.out
+.DS_Store
