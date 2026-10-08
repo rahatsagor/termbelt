@@ -11,7 +11,7 @@ const metadata = require("../package.json");
 function checksum(contents) { return createHash("sha256").update(contents).digest("hex"); }
 function checksums(directory, expected) {
   const entries = new Map();
-  for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8").trim().split("\n")) {
+  for (const line of readFileSync(join(directory, "SHA256SUMS"), "utf8").trim().split(/\r?\n/)) {
     const match = /^([a-f0-9]{64})  ([A-Za-z0-9_.-]+)$/.exec(line);
     assert(match, "invalid checksum entry");
     assert(!entries.has(match[2]), "duplicate checksum entry");

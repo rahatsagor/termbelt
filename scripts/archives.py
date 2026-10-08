@@ -43,6 +43,7 @@ for native in sorted((root / "dist/native").glob("termbelt_*")):
         with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
             for source, name in files:
                 info = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
                 archive.writestr(info, source.read_bytes())
@@ -56,4 +57,4 @@ for native in sorted((root / "dist/native").glob("termbelt_*")):
                     info.mode = 0o755 if name == "termbelt" else 0o644
                     archive.addfile(info, io.BytesIO(contents))
     checksums.append(f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {destination.name}")
-(output / "SHA256SUMS").write_text("\n".join(checksums) + "\n")
+(output / "SHA256SUMS").write_text("\n".join(checksums) + "\n", encoding="utf-8", newline="\n")
