@@ -23,9 +23,55 @@ func TestJSONToolPreservesLargeIntegerAndExtractsNestedPath(t *testing.T) {
 	if result.Output != `9007199254740993` {
 		t.Fatalf("large integer lost precision: got %q", result.Output)
 	}
-	n, ok := result.Data.(json.Number)
-	if !ok || n.String() != "9007199254740993" {
-		t.Fatalf("path data = %#v, want precise json.Number", result.Data)
+	n, ok := result.Data.(json.RawMessage)
+	if !ok || string(n) != "9007199254740993" {
+		t.Fatalf("path data = %#v, want precise raw JSON", result.Data)
+	}
+}
+
+func TestJSONToolKeepsKeyOrderHTMLAndBracketPaths(t *testing.T) {
+	const input = `{"z":1,"a":"<b>&","nested":{"display.name":"Ada","list":[1,2,3]}}`
+	result, err := RunLocal(localRequest("json", input, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.Output, "{\n  \"z\": 1,\n  \"a\": \"<b>&\"") {
+		t.Fatalf("formatted output reordered or escaped: %s", result.Output)
+	}
+	minified, err := RunLocal(localRequest("json", input, map[string]string{"minify": "true"}))
+	if err != nil || minified.Output != input {
+		t.Fatalf("minified = %q, %v", minified.Output, err)
+	}
+	for path, want := range map[string]string{`nested["display.name"]`: `"Ada"`, `nested.list[-1]`: `3`, `nested.list.0`: `1`} {
+		got, err := RunLocal(localRequest("json", input, map[string]string{"path": path}))
+		if err != nil || got.Output != want {
+			t.Errorf("path %s = %q, %v; want %s", path, got.Output, err, want)
+		}
+	}
+	text, _ := RunLocal(localRequest("json", input, map[string]string{"path": `nested["display.name"]`}))
+	if text.RawOutput != "Ada" {
+		t.Fatalf("raw string = %q", text.RawOutput)
+	}
+	if out := PrettyJSON(map[string]string{"html": "<a>&"}); !strings.Contains(out, `"<a>&"`) {
+		t.Fatalf("PrettyJSON escaped HTML: %s", out)
+	}
+}
+
+func TestHashAllAlgorithmsAndVerification(t *testing.T) {
+	all, err := RunLocal(localRequest("hash", "abc", map[string]string{"algorithm": "all"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sums := all.Data.(map[string]any)["hashes"].(map[string]string)
+	if sums["sha384"] != "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7" || len(sums) != 6 {
+		t.Fatalf("sums = %#v", sums)
+	}
+	ok, err := RunLocal(localRequest("hash", "abc", map[string]string{"verify": "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"}))
+	if err != nil || ok.Data.(map[string]any)["verified"] != true {
+		t.Fatalf("verification = %#v, %v", ok.Data, err)
+	}
+	if _, err := RunLocal(localRequest("hash", "abc", map[string]string{"verify": "00"})); err == nil {
+		t.Fatal("mismatched checksum was accepted")
 	}
 }
 

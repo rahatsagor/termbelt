@@ -26,8 +26,14 @@ func ConfigPath() string {
 	}
 	return filepath.Join(base, "termbelt", "config.json")
 }
+
+// DefaultConfig is used when no settings file exists.
+func DefaultConfig() Config {
+	return Config{TimeoutSeconds: 20, Favorites: []string{"speed", "ip", "domains", "site", "json", "uuid"}}
+}
+
 func loadConfigFile() (Config, error) {
-	c := Config{TimeoutSeconds: 20, Favorites: []string{"speed", "ip", "domains", "site", "json", "uuid"}}
+	c := DefaultConfig()
 	if p := ConfigPath(); p != "" {
 		f, err := os.Open(p)
 		if err == nil {
@@ -55,10 +61,59 @@ func LoadConfig() (Config, error) {
 		return c, err
 	}
 	if v := os.Getenv("TERMBELT_IP_API_URL"); v != "" {
-		c.IPAPIURL = v
+		c.IPAPIURL = strings.TrimRight(v, "/")
 	}
 	return normalizeConfig(c)
 }
+
+// LoadEffectiveConfig keeps utilities usable when the settings file is broken:
+// the problem is returned as a warning and defaults are used instead.
+// Environment overrides remain strict because they were set for this run.
+func LoadEffectiveConfig() (config Config, warning error, err error) {
+	config, warning = loadConfigFile()
+	if warning != nil {
+		config = DefaultConfig()
+	}
+	if v := os.Getenv("TERMBELT_IP_API_URL"); v != "" {
+		config.IPAPIURL = strings.TrimRight(v, "/")
+	}
+	config, err = normalizeConfig(config)
+	if err != nil && os.Getenv("TERMBELT_IP_API_URL") != "" {
+		err = fmt.Errorf("TERMBELT_IP_API_URL: %w", err)
+	}
+	return config, warning, err
+}
+
+// loadRepairableConfig reads whatever settings remain valid, so `config set`
+// and `config reset` can repair a damaged file.
+func loadRepairableConfig() Config {
+	c := DefaultConfig()
+	if p := ConfigPath(); p != "" {
+		if f, err := os.Open(p); err == nil {
+			b, readErr := readLimited(f, 1<<20)
+			f.Close()
+			var stored Config
+			if readErr == nil && strings.HasPrefix(strings.TrimSpace(string(b)), "{") && json.Unmarshal(b, &stored) == nil {
+				if stored.TimeoutSeconds >= 3 && stored.TimeoutSeconds <= 120 {
+					c.TimeoutSeconds = stored.TimeoutSeconds
+				}
+				if stored.IPAPIURL != "" {
+					if _, err := ValidateIPAPI(stored.IPAPIURL); err == nil {
+						c.IPAPIURL = stored.IPAPIURL
+					}
+				}
+				if stored.Favorites != nil {
+					c.Favorites = stored.Favorites
+				}
+			}
+		}
+	}
+	c, _ = normalizeConfig(c)
+	return c
+}
+
+// ResetConfig replaces the settings file with defaults.
+func ResetConfig() error { return SaveConfig(DefaultConfig()) }
 
 func normalizeConfig(c Config) (Config, error) {
 	if c.TimeoutSeconds < 3 || c.TimeoutSeconds > 120 {
@@ -145,10 +200,7 @@ func (c *Config) ToggleFavorite(id string) {
 	c.Favorites = append(c.Favorites, id)
 }
 func (c *Config) Set(key, value string) error {
-	stored, err := loadConfigFile()
-	if err != nil {
-		return err
-	}
+	stored := loadRepairableConfig()
 	switch key {
 	case "ip-api-url":
 		value = strings.TrimRight(value, "/")
@@ -164,8 +216,19 @@ func (c *Config) Set(key, value string) error {
 			return fmt.Errorf("timeout-seconds must be 3–120")
 		}
 		stored.TimeoutSeconds = n
+	case "favorites":
+		stored.Favorites = []string{}
+		for _, id := range strings.Split(value, ",") {
+			if id = strings.TrimSpace(id); id == "" {
+				continue
+			}
+			if _, ok := FindTool(id); !ok {
+				return fmt.Errorf("unknown tool %q in favorites", id)
+			}
+			stored.Favorites = append(stored.Favorites, id)
+		}
 	default:
-		return fmt.Errorf("unknown setting %q (supported: ip-api-url, timeout-seconds)", key)
+		return fmt.Errorf("unknown setting %q (supported: ip-api-url, timeout-seconds, favorites)", key)
 	}
 	if err := SaveConfig(stored); err != nil {
 		return err

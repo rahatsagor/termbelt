@@ -44,6 +44,8 @@ function verify(currentOnly = false) {
   assert.deepEqual(metadata.files, ["npm/termbelt.cjs", "npm/platforms.cjs", "README.md", "LICENSE", "THIRD_PARTY_NOTICES"]);
   assert(!metadata.dependencies && !metadata.devDependencies, "unexpected JavaScript dependencies");
   assert.deepEqual(Object.keys(metadata.optionalDependencies).sort(), platforms.map(packageName).sort());
+  const sourceVersion = /var version = "([^"]+)"/.exec(readFileSync(join(root, "main.go"), "utf8"))?.[1];
+  assert.equal(sourceVersion, metadata.version, "main.go version must match package.json for go install builds");
   if (process.env.GITHUB_REF_TYPE === "tag") assert.equal(process.env.GITHUB_REF_NAME, `v${metadata.version}`, "tag and package version differ");
   for (const platform of currentOnly ? [current()] : platforms) {
     const name = packageName(platform);

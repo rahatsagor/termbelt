@@ -22,7 +22,27 @@ import (
 	"golang.org/x/term"
 )
 
-func Execute(version string) error { root := NewCommand(version); return root.Execute() }
+func Execute(version string) error {
+	core.SetVersion(version)
+	root := NewCommand(version)
+	return root.Execute()
+}
+
+// stdinModes lists tools that read piped input when no argument is given.
+// "bytes" keeps input exact; "line" drops a single trailing newline, which
+// echo and most editors append.
+var stdinModes = map[string]string{
+	"json": "bytes", "base64": "bytes", "jwt": "bytes", "hash": "bytes", "regex": "bytes",
+	"url": "line", "cidr": "line", "cron": "line",
+	"domains": "line", "whois": "line", "site": "line", "dns": "line", "tls": "line", "http": "line", "ping": "line",
+}
+
+func trimTrailingNewline(s string) string {
+	if strings.HasSuffix(s, "\r\n") {
+		return s[:len(s)-2]
+	}
+	return strings.TrimSuffix(s, "\n")
+}
 func NewCommand(version string) *cobra.Command {
 	var jsonOutput, plain, raw bool
 	var timeout int
@@ -37,10 +57,13 @@ func NewCommand(version string) *cobra.Command {
 	root.PersistentFlags().IntVar(&timeout, "timeout", 0, "Network request timeout in seconds (3–120)")
 	root.PersistentFlags().StringVar(&ipAPI, "ip-api-url", "", "Use a compatible custom IP lookup API")
 	root.MarkFlagsMutuallyExclusive("json", "raw")
-	load := func() (*core.Engine, error) {
-		config, err := core.LoadConfig()
+	load := func(cmd *cobra.Command) (*core.Engine, error) {
+		config, warning, err := core.LoadEffectiveConfig()
 		if err != nil {
 			return nil, err
+		}
+		if warning != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "termbelt: using default settings: %s\n  fix it with termbelt config set KEY VALUE or termbelt config reset\n", render.Safe(warning.Error()))
 		}
 		if timeout != 0 {
 			if timeout < 3 || timeout > 120 {
@@ -66,7 +89,7 @@ func NewCommand(version string) *cobra.Command {
 		if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 			return cmd.Help()
 		}
-		engine, err := load()
+		engine, err := load(cmd)
 		if err != nil {
 			return err
 		}
@@ -96,41 +119,28 @@ func NewCommand(version string) *cobra.Command {
 			if field.Key == "input" || field.Key == "pattern" {
 				continue
 			}
-			if field.Key == "count" || field.Key == "length" {
+			help := nonemptyHelp(field.Help, field.Label)
+			switch field.Kind {
+			case core.IntField:
 				n, _ := strconv.Atoi(field.Default)
-				cmd.Flags().Int(field.Key, n, field.Help)
-			} else {
-				cmd.Flags().String(field.Key, field.Default, nonemptyHelp(field.Help, field.Label))
+				cmd.Flags().Int(field.Key, n, help)
+			case core.BoolField:
+				cmd.Flags().Bool(field.Key, field.Default == "true", help)
+			default:
+				cmd.Flags().String(field.Key, field.Default, help)
 			}
 		}
 		switch tool.ID {
-		case "speed":
-			cmd.Flags().Int("max-mb", 128, "Maximum MiB transferred per direction (1–1024)")
-			cmd.Flags().Bool("download-only", false, "Skip Cloudflare upload measurement")
 		case "domains":
 			cmd.Flags().Bool("all", false, "Check every TLD in IANA's root-zone list")
-			cmd.Flags().Bool("only-unregistered", false, "Show only unregistered names in the table")
-			cmd.Flags().Bool("refresh", false, "Refresh IANA metadata before the check")
-			cmd.Flags().Int("concurrency", 6, "Parallel lookups, with per-provider pacing (1–12)")
 			cmd.MarkFlagsMutuallyExclusive("all", "tlds")
-		case "dns":
-			cmd.Flags().String("resolver", "", "Custom DNS resolver IP or IP:port")
-		case "json":
-			cmd.Flags().Bool("minify", false, "Compact the JSON output")
 		case "base64":
-			cmd.Flags().Bool("decode", false, "Decode Base64 input")
-			cmd.Flags().Bool("url-safe", false, "Encode unpadded URL-safe Base64")
+			cmd.Flags().Bool("decode", false, "Decode Base64 input (same as --mode decode)")
 		case "url":
-			cmd.Flags().Bool("decode", false, "Decode percent-encoded text")
-		case "hash":
-			cmd.Flags().String("file", "", "Stream a file instead of text")
-		case "password":
-			cmd.Flags().Bool("no-symbols", false, "Use letters and digits only")
-		case "cron":
-			cmd.Flags().String("from", "", "Preview from a specific date or timestamp")
+			cmd.Flags().Bool("decode", false, "Decode percent-encoded text (same as --mode decode)")
 		}
 		cmd.RunE = func(cmd *cobra.Command, args []string) error {
-			engine, err := load()
+			engine, err := load(cmd)
 			if err != nil {
 				return err
 			}
@@ -152,12 +162,12 @@ func NewCommand(version string) *cobra.Command {
 			}
 			ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()
-			needsStdin := tool.Local && tool.ID != "ports" && tool.ID != "uuid" && tool.ID != "password" && tool.ID != "time" && tool.ID != "cron" && tool.ID != "cidr"
+			mode := stdinModes[tool.ID]
 			hasArg := len(args) > 0
 			if tool.ID == "regex" {
 				hasArg = len(args) > 1
 			}
-			if needsStdin && !hasArg && req.Options["file"] == "" && !term.IsTerminal(int(os.Stdin.Fd())) {
+			if mode != "" && !hasArg && req.Options["file"] == "" && !stdinIsTerminal(cmd) {
 				input, closeInput := interruptibleInput(ctx, cmd.InOrStdin())
 				defer closeInput()
 				if tool.ID == "hash" {
@@ -171,6 +181,9 @@ func NewCommand(version string) *cobra.Command {
 						return err
 					}
 					req.Input = string(b)
+					if mode == "line" {
+						req.Input = trimTrailingNewline(req.Input)
+					}
 				}
 			}
 			showProgress := !jsonOutput && !raw && term.IsTerminal(int(os.Stderr.Fd()))
@@ -200,10 +213,15 @@ func NewCommand(version string) *cobra.Command {
 			out := cmd.OutOrStdout()
 			if jsonOutput {
 				enc := json.NewEncoder(out)
+				enc.SetEscapeHTML(false)
 				enc.SetIndent("", "  ")
 				return enc.Encode(result)
 			}
 			if raw {
+				if result.RawOutput != "" {
+					_, err := fmt.Fprintln(out, result.RawOutput)
+					return err
+				}
 				if result.Output != "" {
 					_, err := fmt.Fprintln(out, result.Output)
 					return err
@@ -221,27 +239,39 @@ func NewCommand(version string) *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
-	config := &cobra.Command{Use: "config", Short: "View settings or connect your IP API", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := core.LoadConfig()
+	config := &cobra.Command{Use: "config", Short: "View or change settings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		c, warning, err := core.LoadEffectiveConfig()
 		if err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), core.PrettyJSON(map[string]any{"path": core.ConfigPath(), "settings": c}))
+		view := map[string]any{"path": core.ConfigPath(), "settings": c}
+		if warning != nil {
+			view["warning"] = warning.Error() + "; defaults are in use"
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), render.Safe(core.PrettyJSON(view)))
 		return err
 	}}
-	config.AddCommand(&cobra.Command{Use: "set KEY VALUE", Short: "Save ip-api-url or timeout-seconds", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
-		c, err := core.LoadConfig()
-		if err != nil {
+	config.AddCommand(&cobra.Command{Use: "set KEY VALUE", Short: "Save ip-api-url, timeout-seconds or favorites (comma-separated tool IDs)", Args: cobra.ExactArgs(2), ValidArgs: []string{"ip-api-url", "timeout-seconds", "favorites"}, RunE: func(cmd *cobra.Command, args []string) error {
+		var c core.Config
+		if err := c.Set(args[0], args[1]); err != nil {
 			return err
 		}
-		if err = c.Set(args[0], args[1]); err != nil {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "Saved to", core.ConfigPath())
+		return err
+	}})
+	config.AddCommand(&cobra.Command{Use: "reset", Short: "Restore default settings", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		if err := core.ResetConfig(); err != nil {
 			return err
 		}
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Saved to", core.ConfigPath())
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), "Restored defaults in", core.ConfigPath())
+		return err
+	}})
+	config.AddCommand(&cobra.Command{Use: "path", Short: "Print the settings file location", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := fmt.Fprintln(cmd.OutOrStdout(), core.ConfigPath())
 		return err
 	}})
 	root.AddCommand(config)
-	root.AddCommand(&cobra.Command{Use: "completion [bash|zsh|fish]", Short: "Generate shell completion", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	root.AddCommand(&cobra.Command{Use: "completion [bash|zsh|fish|powershell]", Short: "Generate shell completion", Args: cobra.ExactArgs(1), ValidArgs: []string{"bash", "zsh", "fish", "powershell"}, RunE: func(cmd *cobra.Command, args []string) error {
 		switch args[0] {
 		case "bash":
 			return root.GenBashCompletionV2(cmd.OutOrStdout(), true)
@@ -249,8 +279,10 @@ func NewCommand(version string) *cobra.Command {
 			return root.GenZshCompletion(cmd.OutOrStdout())
 		case "fish":
 			return root.GenFishCompletion(cmd.OutOrStdout(), true)
+		case "powershell":
+			return root.GenPowerShellCompletionWithDesc(cmd.OutOrStdout())
 		default:
-			return fmt.Errorf("choose bash, zsh or fish")
+			return fmt.Errorf("choose bash, zsh, fish or powershell")
 		}
 	}})
 	return root
@@ -272,6 +304,14 @@ func interruptibleInput(ctx context.Context, source io.Reader) (io.Reader, func(
 		}
 	})
 	return r, func() { stop(); _ = r.Close() }
+}
+
+// Tests replace stdin with a reader; only the real os.Stdin can be a terminal.
+func stdinIsTerminal(cmd *cobra.Command) bool {
+	if f, ok := cmd.InOrStdin().(*os.File); ok {
+		return term.IsTerminal(int(f.Fd()))
+	}
+	return false
 }
 
 func nonemptyHelp(value, fallback string) string {

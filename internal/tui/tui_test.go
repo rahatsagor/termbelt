@@ -178,3 +178,28 @@ func TestLocalInputsAreNotSavedAsDrafts(t *testing.T) {
 		m.cancel()
 	}
 }
+
+func TestToggleFieldsSwitchWithSpaceAndReachTheRequest(t *testing.T) {
+	m := testModel()
+	tool, _ := core.FindTool("password")
+	m.openTool(tool)
+	for m.fields[m.focus].spec.Key != "no-symbols" {
+		press(m, key(tea.KeyTab))
+	}
+	typeText(m, "q")
+	if m.fields[m.focus].checked {
+		t.Fatal("ordinary text toggled the option")
+	}
+	press(m, key(tea.KeySpace))
+	if got := m.request().Options["no-symbols"]; got != "true" {
+		t.Fatalf("no-symbols = %q after space", got)
+	}
+	m.width, m.height = 100, 32
+	if view := m.View().Content; !strings.Contains(ansi.Strip(view), "[x] on") {
+		t.Fatalf("toggle not rendered: %s", ansi.Strip(view))
+	}
+	press(m, key(tea.KeySpace))
+	if got := m.request().Options["no-symbols"]; got != "false" {
+		t.Fatalf("no-symbols = %q after second space", got)
+	}
+}

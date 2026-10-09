@@ -34,9 +34,11 @@ cases = [
     ("IPv6 subnet", ["cidr", "2001:db8::/64"], lambda d: d["data"]["addresses"] == "18446744073709551616"),
     ("Cron / Dhaka", ["cron", "*/15 * * * *", "--zone", "Asia/Dhaka"], lambda d: len(d["data"]["next_runs"]) == 8),
     ("Local IP classification", ["ip", "192.168.1.1"], lambda d: d["data"]["source"] == "local classification"),
+    ("JSON key order / HTML", ["json"], lambda d: d["output"].index('"z"') < d["output"].index('"a"') and "<b>" in d["output"], '{"z":1,"a":"<b>"}'),
+    ("Bare address subnet", ["cidr", "10.0.0.1"], lambda d: d["data"]["network"] == "10.0.0.1/32"),
+    ("All checksums", ["hash", "abc", "--algorithm", "all"], lambda d: len(d["data"]["hashes"]) == 6),
+    ("Local port inspection", ["ports"], lambda d: d["title"] == "Local listening ports" and isinstance(d.get("data", []), list)),
 ]
-if os.name != "nt":
-    cases.append(("Local port inspection", ["ports"], lambda d: d["title"] == "Local listening ports"))
 if args.live:
     cases += [
         ("Public IP", ["ip"], lambda d: bool(d["data"]["ip"])),
@@ -47,6 +49,10 @@ if args.live:
         ("DNS / all record types", ["dns", "example.com"], lambda d: any(r["type"] == "A" for r in d["data"])),
         ("DNS / custom resolver", ["dns", "example.com", "--type", "A", "--resolver", "1.1.1.1"], lambda d: bool(d["data"])),
         ("TLS / trusted certificate", ["tls", "example.com"], lambda d: d["data"]["trusted"] is True),
+        ("TLS / URL input", ["tls", "https://example.com"], lambda d: d["data"]["port"] == "443" and bool(d["data"]["chain"])),
+        ("WHOIS fallback / registered .io", ["domains", "google.io"], lambda d: d["data"]["counts"]["registered"] == 1 and d["data"]["domains"][0]["protocol"] == "whois"),
+        ("WHOIS fallback / unregistered .io", ["domains", "termbelt-smoke-" + uuid.uuid4().hex[:16] + ".io"], lambda d: d["data"]["counts"]["unregistered"] == 1),
+        ("DNS / reverse lookup", ["dns", "1.1.1.1"], lambda d: any(r["type"] == "PTR" for r in d["data"])),
         ("HTTP / timings", ["http", "https://example.com"], lambda d: d["data"]["status"] == 200 and d["data"]["timings_ms"]["total"] > 0),
         ("Website / CDN evidence", ["site", "github.com"], lambda d: bool(d["data"]["addresses"]) and d["data"]["http"]["status"] == 200),
         ("TCP latency", ["ping", "example.com", "--count", "2"], lambda d: d["data"]["failed"] == 0),

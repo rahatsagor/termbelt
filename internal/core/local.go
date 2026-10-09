@@ -70,40 +70,138 @@ func decodeJSON(input string) (any, error) {
 	return v, nil
 }
 func jsonTool(r Request) (Result, error) {
-	v, err := decodeJSON(r.Input)
-	if err != nil {
+	input := strings.TrimSpace(r.Input)
+	if _, err := decodeJSON(input); err != nil {
 		return Result{}, err
 	}
-	if path := r.Opt("path", ""); path != "" {
-		for _, key := range strings.Split(path, ".") {
-			switch x := v.(type) {
-			case map[string]any:
-				var ok bool
-				v, ok = x[key]
-				if !ok {
-					return Result{}, fmt.Errorf("path key %q does not exist", key)
-				}
-			case []any:
-				i, err := strconv.Atoi(key)
-				if err != nil || i < 0 || i >= len(x) {
-					return Result{}, fmt.Errorf("invalid array index %q", key)
-				}
-				v = x[i]
-			default:
-				return Result{}, fmt.Errorf("cannot traverse %q through a scalar", key)
+	value := json.RawMessage(input)
+	summary := "Valid JSON · key order and numeric precision preserved"
+	if path := strings.TrimSpace(r.Opt("path", "")); path != "" {
+		segments, err := parseJSONPath(path)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, segment := range segments {
+			if value, err = jsonChild(value, segment); err != nil {
+				return Result{}, err
 			}
 		}
+		summary = "Value at " + path
 	}
-	var b []byte
+	var formatted bytes.Buffer
+	var err error
 	if r.Bool("minify") {
-		b, err = json.Marshal(v)
+		err = json.Compact(&formatted, value)
 	} else {
-		b, err = json.MarshalIndent(v, "", "  ")
+		err = json.Indent(&formatted, value, "", "  ")
 	}
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Title: "JSON workbench", Summary: "Valid JSON · numeric precision preserved", Output: string(b), Data: v}, nil
+	compact, err := compactJSON(value)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Title: "JSON workbench", Summary: summary, Output: formatted.String(), Data: json.RawMessage(compact)}
+	var text string
+	if len(compact) > 0 && compact[0] == '"' && json.Unmarshal(compact, &text) == nil {
+		result.RawOutput = text
+	}
+	return result, nil
+}
+
+// parseJSONPath accepts dotted paths (users.0.name) and bracket segments
+// (users[0]["display.name"]) for keys that contain dots or brackets.
+func parseJSONPath(path string) ([]string, error) {
+	segments := []string{}
+	current := strings.Builder{}
+	flush := func() {
+		if current.Len() > 0 {
+			segments = append(segments, current.String())
+			current.Reset()
+		}
+	}
+	for i := 0; i < len(path); i++ {
+		switch c := path[i]; c {
+		case '.':
+			flush()
+		case '[':
+			flush()
+			end := strings.IndexByte(path[i:], ']')
+			if i+1 < len(path) && (path[i+1] == '"' || path[i+1] == '\'') {
+				quote := path[i+1]
+				closing := -1
+				for j := i + 2; j < len(path); j++ {
+					if path[j] == '\\' {
+						j++
+						continue
+					}
+					if path[j] == quote {
+						closing = j
+						break
+					}
+				}
+				if closing < 0 || closing+1 >= len(path) || path[closing+1] != ']' {
+					return nil, fmt.Errorf("unterminated quoted key in path")
+				}
+				key := path[i+2 : closing]
+				if quote == '"' {
+					if err := json.Unmarshal([]byte(path[i+1:closing+1]), &key); err != nil {
+						return nil, fmt.Errorf("invalid quoted key in path")
+					}
+				}
+				segments = append(segments, key)
+				i = closing + 1
+				continue
+			}
+			if end < 0 {
+				return nil, fmt.Errorf("unterminated [ in path")
+			}
+			segments = append(segments, path[i+1:i+end])
+			i += end
+		default:
+			current.WriteByte(c)
+		}
+	}
+	flush()
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("empty JSON path")
+	}
+	return segments, nil
+}
+
+func jsonChild(value json.RawMessage, key string) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(value)
+	if len(trimmed) == 0 {
+		return nil, fmt.Errorf("cannot traverse %q through an empty value", key)
+	}
+	switch trimmed[0] {
+	case '{':
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(trimmed, &object); err != nil {
+			return nil, err
+		}
+		child, ok := object[key]
+		if !ok {
+			return nil, fmt.Errorf("path key %q does not exist", key)
+		}
+		return child, nil
+	case '[':
+		var array []json.RawMessage
+		if err := json.Unmarshal(trimmed, &array); err != nil {
+			return nil, err
+		}
+		i, err := strconv.Atoi(key)
+		if err == nil && i < 0 {
+			i += len(array)
+		}
+		if err != nil || i < 0 || i >= len(array) {
+			return nil, fmt.Errorf("invalid array index %q (length %d)", key, len(array))
+		}
+		return array[i], nil
+	default:
+		return nil, fmt.Errorf("cannot traverse %q through a scalar", key)
+	}
 }
 func base64Tool(r Request) (Result, error) {
 	mode := r.Opt("mode", "encode")
@@ -193,6 +291,7 @@ func jwtTool(r Request) (Result, error) {
 	}
 	claims := values[1].(map[string]any)
 	rows := []Row{}
+	status := "active"
 	for _, key := range []string{"iat", "nbf", "exp"} {
 		if val, ok := claims[key]; ok {
 			num, ok := val.(json.Number)
@@ -207,17 +306,30 @@ func jwtTool(r Request) (Result, error) {
 			}
 			t := time.Unix(int64(f), 0)
 			value := t.UTC().Format(time.RFC3339)
-			if key == "exp" {
-				if time.Now().After(t) {
-					value += " · expired"
-				} else {
-					value += " · expires in " + time.Until(t).Round(time.Second).String()
-				}
+			switch {
+			case key == "exp" && time.Now().After(t):
+				value += " · expired " + time.Since(t).Round(time.Second).String() + " ago"
+				status = "expired"
+			case key == "exp":
+				value += " · expires in " + time.Until(t).Round(time.Second).String()
+			case key == "nbf" && time.Now().Before(t):
+				value += " · not valid yet"
+				status = "not yet valid"
+			case key == "iat" && time.Now().Before(t):
+				value += " · issued in the future"
 			}
 			rows = append(rows, row(key, value))
 		}
 	}
-	return Result{Title: "JWT inspector", Summary: "Decoded locally · signature NOT verified", Sections: []Section{{Title: "HEADER", Text: PrettyJSON(values[0])}, {Title: "CLAIMS", Text: PrettyJSON(values[1])}, {Title: "TIMESTAMPS", Rows: rows}}, Notes: []string{"Claims are untrusted. Decoding a token does not verify its signature or authenticity."}, Data: map[string]any{"header": values[0], "claims": claims, "signature_verified": false}}, nil
+	if _, ok := claims["exp"]; !ok {
+		status = "no expiry"
+	}
+	header := values[0].(map[string]any)
+	notes := []string{"Claims are untrusted. Decoding a token does not verify its signature or authenticity."}
+	if alg, _ := header["alg"].(string); strings.EqualFold(alg, "none") {
+		notes = append(notes, "The header declares alg \"none\": this token is unsigned.")
+	}
+	return Result{Title: "JWT inspector", Summary: "Decoded locally · " + status + " · signature NOT verified", Sections: []Section{{Title: "HEADER", Text: PrettyJSON(values[0])}, {Title: "CLAIMS", Text: PrettyJSON(values[1])}, {Title: "TIMESTAMPS", Rows: rows}}, Notes: notes, Data: map[string]any{"header": values[0], "claims": claims, "status": status, "signature_verified": false}}, nil
 }
 func hashTool(r Request) (Result, error) {
 	return hashToolContext(context.Background(), r)
@@ -236,20 +348,23 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 func hashToolContext(ctx context.Context, r Request) (Result, error) {
-	algo := strings.ToLower(r.Opt("algorithm", "sha256"))
-	var h hash.Hash
-	switch algo {
-	case "sha256":
-		h = sha256.New()
-	case "sha512":
-		h = sha512.New()
-	case "sha1":
-		h = sha1.New()
-	case "md5":
-		h = md5.New()
-	default:
-		return Result{}, fmt.Errorf("algorithm must be sha256, sha512, sha1 or md5")
+	algo := strings.ToLower(strings.TrimSpace(r.Opt("algorithm", "sha256")))
+	constructors := map[string]func() hash.Hash{"sha256": sha256.New, "sha512": sha512.New, "sha384": sha512.New384, "sha224": sha256.New224, "sha1": sha1.New, "md5": md5.New}
+	names := []string{algo}
+	if algo == "all" {
+		names = []string{"sha256", "sha512", "sha384", "sha224", "sha1", "md5"}
 	}
+	hashes := make([]hash.Hash, len(names))
+	writers := make([]io.Writer, len(names))
+	for i, name := range names {
+		constructor, ok := constructors[name]
+		if !ok {
+			return Result{}, fmt.Errorf("algorithm must be sha256, sha512, sha384, sha224, sha1, md5 or all")
+		}
+		hashes[i] = constructor()
+		writers[i] = hashes[i]
+	}
+	h := io.MultiWriter(writers...)
 	var source io.Reader = strings.NewReader(r.Input)
 	label := "text"
 	if r.InputReader != nil {
@@ -291,13 +406,44 @@ func hashToolContext(ctx context.Context, r Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	sum := hex.EncodeToString(h.Sum(nil))
 	notes := []string{}
 	if algo == "md5" || algo == "sha1" {
 		notes = append(notes, "Use MD5 / SHA-1 only for legacy checksums; use SHA-256 for security-sensitive integrity checks.")
 	}
-	return Result{Title: strings.ToUpper(algo) + " checksum", Summary: fmt.Sprintf("%s · %d bytes", label, n), Output: sum, Notes: notes, Data: map[string]any{"algorithm": algo, "hash": sum, "bytes": n}}, nil
+	if len(names) == 1 {
+		sum := hex.EncodeToString(hashes[0].Sum(nil))
+		if expected := strings.ToLower(strings.TrimSpace(r.Opt("verify", ""))); expected != "" {
+			return hashVerification(algo, label, n, sum, expected, notes)
+		}
+		return Result{Title: strings.ToUpper(algo) + " checksum", Summary: fmt.Sprintf("%s · %d bytes", label, n), Output: sum, Notes: notes, Data: map[string]any{"algorithm": algo, "hash": sum, "bytes": n}}, nil
+	}
+	rows := []Row{}
+	sums := map[string]string{}
+	lines := []string{}
+	for i, name := range names {
+		sum := hex.EncodeToString(hashes[i].Sum(nil))
+		sums[name] = sum
+		rows = append(rows, row(strings.ToUpper(name), sum))
+		lines = append(lines, fmt.Sprintf("%-6s  %s", name, sum))
+	}
+	if expected := strings.ToLower(strings.TrimSpace(r.Opt("verify", ""))); expected != "" {
+		for _, name := range names {
+			if sums[name] == expected {
+				return hashVerification(name, label, n, sums[name], expected, notes)
+			}
+		}
+		return hashVerification("any", label, n, "", expected, notes)
+	}
+	return Result{Title: "Checksums", Summary: fmt.Sprintf("%s · %d bytes", label, n), Sections: []Section{{Title: "DIGESTS", Rows: rows}}, RawOutput: strings.Join(lines, "\n"), Notes: []string{"MD5 and SHA-1 are suitable only for legacy checksums."}, Data: map[string]any{"algorithm": "all", "hashes": sums, "bytes": n}}, nil
 }
+
+func hashVerification(algo, label string, n int64, sum, expected string, notes []string) (Result, error) {
+	if sum != expected {
+		return Result{}, fmt.Errorf("checksum mismatch for %s: expected %s, got %s", label, expected, nonempty(sum, "no matching algorithm"))
+	}
+	return Result{Title: strings.ToUpper(algo) + " checksum verified", Summary: fmt.Sprintf("%s · %d bytes · matches", label, n), Output: sum, Notes: notes, Data: map[string]any{"algorithm": algo, "hash": sum, "bytes": n, "verified": true}}, nil
+}
+
 func uuidTool(r Request) (Result, error) {
 	n, err := r.Int("count", 1, 1, 100)
 	if err != nil {
@@ -532,9 +678,13 @@ func regexTool(r Request) (Result, error) {
 	return Result{Title: "Regex playground", Summary: fmt.Sprintf("%d matches", len(matches)), Table: table, Notes: notes, Data: data}, nil
 }
 func cidrTool(r Request) (Result, error) {
-	p, err := netip.ParsePrefix(strings.TrimSpace(r.Input))
+	input := strings.TrimSpace(r.Input)
+	if ip, err := netip.ParseAddr(input); err == nil && !strings.Contains(input, "/") {
+		input = netip.PrefixFrom(ip, ip.BitLen()).String()
+	}
+	p, err := netip.ParsePrefix(input)
 	if err != nil {
-		return Result{}, fmt.Errorf("invalid CIDR prefix: %w", err)
+		return Result{}, fmt.Errorf("invalid CIDR prefix (expected an address/length such as 10.0.0.0/8): %w", err)
 	}
 	p = p.Masked()
 	addr := p.Addr()
@@ -555,15 +705,26 @@ func cidrTool(r Request) (Result, error) {
 		if bits > 1 {
 			usable.Sub(usable, big.NewInt(2))
 		}
-		rows = append(rows, row("Netmask", maskAddr.String()), row("Usable hosts", usable.String()), row("Broadcast", last.String()))
+		wildcard := make([]byte, len(maskBytes))
+		for i, b := range maskBytes {
+			wildcard[i] = ^b
+		}
+		wildcardAddr, _ := netip.AddrFromSlice(wildcard)
+		firstHost, lastHost := addr, last
+		if bits > 1 {
+			firstHost, lastHost = addr.Next(), last.Prev()
+		}
+		rows = append(rows, row("Netmask", maskAddr.String()), row("Wildcard", wildcardAddr.String()), row("Usable hosts", usable.String()), row("Host range", firstHost.String()+" – "+lastHost.String()), row("Broadcast", last.String()))
+		data["netmask"], data["wildcard"], data["usable_hosts"] = maskAddr.String(), wildcardAddr.String(), usable.String()
+		data["first_host"], data["last_host"] = firstHost.String(), lastHost.String()
 		if bits <= 1 {
 			rows[len(rows)-1] = row("Broadcast", "none (/31 or /32)")
 		}
 	}
-	if input := r.Opt("contains", ""); input != "" {
+	if input := strings.TrimSpace(r.Opt("contains", "")); input != "" {
 		ip, err := netip.ParseAddr(input)
 		if err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("invalid IP for --contains: %w", err)
 		}
 		contains := p.Contains(ip)
 		rows = append(rows, row("Contains "+input, contains))
@@ -572,7 +733,6 @@ func cidrTool(r Request) (Result, error) {
 	return Result{Title: "Subnet calculator", Sections: []Section{{Title: "ADDRESS SPACE", Rows: rows}}, Data: data}, nil
 }
 
-// Keep byte-oriented decode helpers small and independently testable.
 func compactJSON(b []byte) ([]byte, error) {
 	var out bytes.Buffer
 	err := json.Compact(&out, b)

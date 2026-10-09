@@ -2,6 +2,9 @@ package core
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -10,14 +13,13 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/netip"
 	"net/url"
-	"os/exec"
 	"regexp"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,7 +100,7 @@ func (e *Engine) get(ctx context.Context, address string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Header.Set("User-Agent", "termbelt/1.0")
+	req.Header.Set("User-Agent", UserAgent)
 	req.Header.Set("Accept", "application/json, application/rdap+json, text/plain, */*")
 	resp, err := e.Client.Do(req)
 	if err != nil {
@@ -139,8 +141,57 @@ type IPData struct {
 	Source       string  `json:"source"`
 }
 
+func formatASN(asn int) string {
+	if asn <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("AS%d", asn)
+}
+
+// Shared, documentation, benchmarking and reserved ranges are not routed on the
+// public internet, so geolocation providers have nothing meaningful to say.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("100::/64"),
+}
+
+func localIPKind(ip netip.Addr) string {
+	switch {
+	case ip.IsLoopback():
+		return "Loopback address"
+	case ip.IsPrivate():
+		return "Private network"
+	case ip.IsLinkLocalUnicast():
+		return "Link-local address"
+	case ip.IsMulticast(), ip.IsLinkLocalMulticast():
+		return "Multicast address"
+	case ip.IsUnspecified():
+		return "Unspecified address"
+	case netip.MustParsePrefix("100.64.0.0/10").Contains(ip):
+		return "Carrier-grade NAT shared address"
+	default:
+		return "Reserved or documentation address"
+	}
+}
+
 func isLocalIP(ip netip.Addr) bool {
-	return ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast()
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() {
+		return true
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 	input = strings.TrimSpace(input)
@@ -162,12 +213,11 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 					break
 				}
 			}
-			input = ip.String()
 		}
 		ip = ip.Unmap()
 		input = ip.String()
 		if isLocalIP(ip) {
-			return IPData{IP: ip.String(), Source: "local classification", Organization: "Private / local network"}, nil
+			return IPData{IP: ip.String(), Source: "local classification", Organization: localIPKind(ip)}, nil
 		}
 	}
 	if e.Config.IPAPIURL != "" {
@@ -210,10 +260,7 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 		err = validateProviderIP(d.IP, input)
 	}
 	if err == nil {
-		asn := ""
-		if d.Connection.ASN > 0 {
-			asn = fmt.Sprintf("AS%d", d.Connection.ASN)
-		}
+		asn := formatASN(d.Connection.ASN)
 		return IPData{IP: d.IP, City: d.City, Region: d.Region, Country: d.Country, CountryCode: d.CountryCode, Continent: d.Continent, Latitude: d.Latitude, Longitude: d.Longitude, Timezone: d.Timezone.ID, Postal: d.Postal, ISP: d.Connection.ISP, Organization: d.Connection.Org, ASN: asn, Source: "https://ipwho.is"}, nil
 	}
 	if ctx.Err() != nil {
@@ -239,7 +286,7 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 	if len(fallback.TimeZones) > 0 {
 		zone = fallback.TimeZones[0]
 	}
-	return IPData{IP: fallback.IPAddr, City: fallback.CityName, Region: fallback.RegionName, Country: fallback.CountryName, Continent: fallback.Continent, Postal: fallback.ZipCode, Latitude: fallback.Latitude, Longitude: fallback.Longitude, Timezone: zone, Organization: fallback.ASNOrganization, ASN: fmt.Sprintf("AS%d", fallback.ASN), Source: "https://free.freeipapi.com"}, nil
+	return IPData{IP: fallback.IPAddr, City: fallback.CityName, Region: fallback.RegionName, Country: fallback.CountryName, Continent: fallback.Continent, Postal: fallback.ZipCode, Latitude: fallback.Latitude, Longitude: fallback.Longitude, Timezone: zone, Organization: fallback.ASNOrganization, ASN: formatASN(fallback.ASN), Source: "https://free.freeipapi.com"}, nil
 }
 
 func validateProviderIP(returned, requested string) error {
@@ -265,7 +312,7 @@ func (e *Engine) IP(ctx context.Context, r Request) (Result, error) {
 	}
 	notes := []string{"IP geolocation is approximate; a VPN or proxy changes the observed location."}
 	if d.Source == "local classification" {
-		notes = []string{"This address belongs to a private or local network and was not sent to a geolocation service."}
+		notes = []string{"This address is not publicly routable, so it was classified locally and not sent to a geolocation service."}
 	}
 	return Result{Title: "IP intelligence", Summary: d.IP, Sections: []Section{{Title: "NETWORK & LOCATION", Rows: ipRows(d)}}, Notes: notes, Data: d}, nil
 }
@@ -314,7 +361,7 @@ func (e *Engine) inspectHTTP(ctx context.Context, input string) (HTTPData, error
 	if err != nil {
 		return HTTPData{}, err
 	}
-	req.Header.Set("User-Agent", "termbelt/1.0")
+	req.Header.Set("User-Agent", UserAgent)
 	redirects := []string{}
 	client := *e.Client
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -376,8 +423,9 @@ type DNSRecord struct {
 }
 
 func dnsResolver(custom string) (string, error) {
+	custom = strings.TrimSpace(custom)
 	if custom != "" {
-		host := custom
+		host := strings.Trim(custom, "[]")
 		if h, p, err := net.SplitHostPort(custom); err == nil {
 			if _, err = netip.ParseAddr(h); err != nil {
 				return "", fmt.Errorf("resolver must be an IP address")
@@ -393,15 +441,29 @@ func dnsResolver(custom string) (string, error) {
 		}
 		return net.JoinHostPort(host, "53"), nil
 	}
-	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err == nil && len(cfg.Servers) > 0 {
-		return net.JoinHostPort(cfg.Servers[0], cfg.Port), nil
+	if servers := systemResolvers(); len(servers) > 0 {
+		return servers[0], nil
 	}
-	return "", fmt.Errorf("could not read system DNS resolver; specify --resolver 1.1.1.1")
+	return "", fmt.Errorf("could not read the system DNS resolver; specify --resolver 1.1.1.1")
+}
+
+func resolvConfServers() []string {
+	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
+	if err != nil {
+		return nil
+	}
+	servers := []string{}
+	for _, server := range cfg.Servers {
+		if ip, err := netip.ParseAddr(server); err == nil {
+			servers = append(servers, net.JoinHostPort(ip.String(), cfg.Port))
+		}
+	}
+	return servers
 }
 func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([]DNSRecord, error) {
 	msg := new(dns.Msg)
 	msg.SetQuestion(dns.Fqdn(host), kind)
+	msg.SetEdns0(1232, false)
 	client := &dns.Client{Timeout: 5 * time.Second}
 	reply, _, err := client.ExchangeContext(ctx, msg, resolver)
 	if err != nil {
@@ -420,29 +482,37 @@ func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([
 	records := []DNSRecord{}
 	for _, rr := range reply.Answer {
 		header := rr.Header()
-		value := rr.String()
-		fields := strings.Fields(value)
-		if len(fields) >= 5 {
-			value = strings.Join(fields[4:], " ")
-		}
+		value := strings.TrimSpace(strings.TrimPrefix(rr.String(), header.String()))
 		records = append(records, DNSRecord{Type: dns.TypeToString[header.Rrtype], Name: header.Name, TTL: header.Ttl, Value: value})
 	}
 	return records, nil
 }
 func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
-	host, err := hostname(r.Input)
+	var host string
+	var err error
+	reverse := false
+	if ip, parseErr := netip.ParseAddr(strings.Trim(strings.TrimSpace(r.Input), "[]")); parseErr == nil {
+		host, err = dns.ReverseAddr(ip.String())
+		reverse = true
+	} else {
+		host, err = hostname(r.Input)
+	}
 	if err != nil {
 		return Result{}, err
 	}
+	host = strings.TrimSuffix(host, ".")
 	resolver, err := dnsResolver(r.Opt("resolver", ""))
 	if err != nil {
 		return Result{}, err
 	}
-	kind := strings.ToUpper(r.Opt("type", "ALL"))
+	kind := strings.ToUpper(strings.TrimSpace(r.Opt("type", "ALL")))
+	if reverse && kind == "ALL" {
+		kind = "PTR"
+	}
 	types := []uint16{dns.TypeA, dns.TypeAAAA, dns.TypeMX, dns.TypeNS, dns.TypeTXT, dns.TypeCNAME, dns.TypeSOA, dns.TypeCAA}
 	if kind != "ALL" {
 		t, ok := dns.StringToType[kind]
-		if !ok {
+		if !ok || t == dns.TypeAXFR || t == dns.TypeIXFR || t == dns.TypeOPT {
 			return Result{}, fmt.Errorf("unsupported DNS record type %q", kind)
 		}
 		types = []uint16{t}
@@ -488,33 +558,54 @@ func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 	}
 	return Result{Title: "DNS records", Summary: host + " · resolver " + resolver, Table: table, Notes: notes, Data: records}, nil
 }
+
+// splitHostPort accepts host, host:port, [IPv6]:port, bare IPv6, and http(s)
+// URLs. Internationalized hostnames are converted to their ASCII form.
 func splitHostPort(input string, defaultPort string) (string, string, error) {
-	if h, p, err := net.SplitHostPort(strings.TrimSpace(input)); err == nil {
-		n, err := strconv.Atoi(p)
-		if err != nil || n < 1 || n > 65535 || h == "" {
-			return "", "", fmt.Errorf("invalid host or port")
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", "", fmt.Errorf("enter a host, host:port or URL")
+	}
+	if strings.Contains(input, "://") || strings.Contains(input, "/") {
+		u, err := parseHTTPURL(input)
+		if err != nil {
+			return "", "", err
 		}
-		return h, p, nil
+		p := u.Port()
+		if p == "" {
+			p = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+		}
+		return strings.TrimSuffix(strings.ToLower(u.Hostname()), "."), p, nil
 	}
+	host, port := input, defaultPort
 	if ip, err := netip.ParseAddr(strings.Trim(input, "[]")); err == nil {
-		return ip.String(), defaultPort, nil
+		return ip.String(), port, nil
 	}
-	u, err := parseHTTPURL(input)
-	if err != nil {
-		return "", "", err
+	if h, p, err := net.SplitHostPort(input); err == nil {
+		host, port = h, p
 	}
-	p := u.Port()
-	if p == "" {
-		p = defaultPort
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", "", fmt.Errorf("port must be 1–65535")
 	}
-	return u.Hostname(), p, nil
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return "", "", fmt.Errorf("enter a host before the port")
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ip.String(), port, nil
+	}
+	ascii, err := idna.Lookup.ToASCII(strings.TrimSuffix(host, "."))
+	if err != nil || ascii == "" || strings.ContainsAny(ascii, " \t\r\n?#@[]") {
+		return "", "", fmt.Errorf("invalid hostname %q", host)
+	}
+	return strings.ToLower(ascii), port, nil
 }
 func (e *Engine) TLS(ctx context.Context, r Request) (Result, error) {
 	host, port, err := splitHostPort(r.Input, "443")
 	if err != nil {
 		return Result{}, err
 	}
-	dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: time.Duration(e.Config.TimeoutSeconds) * time.Second}, Config: &tls.Config{ServerName: host, InsecureSkipVerify: true}} // Inspection only: trust is verified explicitly below.
+	dialer := tls.Dialer{NetDialer: &net.Dialer{Timeout: time.Duration(e.Config.TimeoutSeconds) * time.Second}, Config: &tls.Config{ServerName: host, InsecureSkipVerify: true, NextProtos: []string{"h2", "http/1.1"}}} // Inspection only: trust is verified explicitly below.
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return Result{}, err
@@ -532,20 +623,55 @@ func (e *Engine) TLS(ctx context.Context, r Request) (Result, error) {
 	_, verifyErr := cert.Verify(x509.VerifyOptions{DNSName: host, Intermediates: intermediates})
 	trusted := verifyErr == nil
 	sum := sha256.Sum256(cert.Raw)
-	days := int(time.Until(cert.NotAfter).Hours() / 24)
+	days := int(math.Floor(time.Until(cert.NotAfter).Hours() / 24))
 	notes := []string{}
+	verifyMessage := ""
 	if verifyErr != nil {
-		notes = append(notes, "Certificate verification failed: "+verifyErr.Error())
+		verifyMessage = verifyErr.Error()
+		notes = append(notes, "Certificate verification failed: "+verifyMessage)
 	}
-	rows := []Row{row("Subject", cert.Subject.String()), row("Issuer", cert.Issuer.String()), row("Valid from", cert.NotBefore.Format(time.RFC3339)), row("Expires", cert.NotAfter.Format(time.RFC3339)), row("Days remaining", days), row("Trusted", trusted), row("TLS", tls.VersionName(state.Version)), row("Cipher", tls.CipherSuiteName(state.CipherSuite)), row("Serial", cert.SerialNumber.Text(16)), row("SHA-256", hex.EncodeToString(sum[:])), row("DNS names", strings.Join(cert.DNSNames, ", ")), row("Chain length", len(state.PeerCertificates))}
-	return Result{Title: "TLS certificate", Summary: host + ":" + port, Metrics: []Metric{{Label: "EXPIRES IN", Value: strconv.Itoa(days), Unit: "days"}, {Label: "TRUST", Value: map[bool]string{true: "valid", false: "failed"}[trusted]}}, Sections: []Section{{Title: "CERTIFICATE", Rows: rows}}, Notes: notes, Data: map[string]any{"host": host, "port": port, "trusted": trusted, "issuer": cert.Issuer.String(), "subject": cert.Subject.String(), "not_before": cert.NotBefore, "not_after": cert.NotAfter, "days_remaining": days, "dns_names": cert.DNSNames, "sha256": hex.EncodeToString(sum[:]), "tls_version": tls.VersionName(state.Version)}}, nil
+	switch {
+	case time.Now().After(cert.NotAfter):
+		notes = append(notes, "The certificate has expired.")
+	case time.Now().Before(cert.NotBefore):
+		notes = append(notes, "The certificate is not valid yet.")
+	case days < 14:
+		notes = append(notes, fmt.Sprintf("The certificate expires in %d days; renew it soon.", days))
+	}
+	names := append(append([]string{}, cert.DNSNames...), ipStrings(cert.IPAddresses)...)
+	alpn := nonempty(state.NegotiatedProtocol, "none")
+	rows := []Row{row("Subject", cert.Subject.String()), row("Issuer", cert.Issuer.String()), row("Valid from", cert.NotBefore.Format(time.RFC3339)), row("Expires", cert.NotAfter.Format(time.RFC3339)), row("Days remaining", days), row("Trusted", trusted), row("TLS", tls.VersionName(state.Version)), row("Cipher", tls.CipherSuiteName(state.CipherSuite)), row("ALPN", alpn), row("Key", publicKeyDescription(cert)), row("Signature", cert.SignatureAlgorithm.String()), row("Serial", cert.SerialNumber.Text(16)), row("SHA-256", hex.EncodeToString(sum[:])), row("Names", strings.Join(names, ", ")), row("Chain length", len(state.PeerCertificates))}
+	chain := []map[string]any{}
+	chainRows := []Row{}
+	for i, c := range state.PeerCertificates {
+		chain = append(chain, map[string]any{"subject": c.Subject.String(), "issuer": c.Issuer.String(), "not_before": c.NotBefore, "not_after": c.NotAfter, "is_ca": c.IsCA})
+		chainRows = append(chainRows, row(fmt.Sprintf("#%d", i), c.Subject.CommonName+" · expires "+c.NotAfter.Format("2006-01-02")))
+	}
+	return Result{Title: "TLS certificate", Summary: host + ":" + port, Metrics: []Metric{{Label: "EXPIRES IN", Value: strconv.Itoa(days), Unit: "days"}, {Label: "TRUST", Value: map[bool]string{true: "valid", false: "failed"}[trusted]}}, Sections: []Section{{Title: "CERTIFICATE", Rows: rows}, {Title: "PRESENTED CHAIN", Rows: chainRows}}, Notes: notes, Data: map[string]any{"host": host, "port": port, "trusted": trusted, "verify_error": verifyMessage, "issuer": cert.Issuer.String(), "subject": cert.Subject.String(), "not_before": cert.NotBefore, "not_after": cert.NotAfter, "days_remaining": days, "dns_names": cert.DNSNames, "ip_addresses": ipStrings(cert.IPAddresses), "serial": cert.SerialNumber.Text(16), "sha256": hex.EncodeToString(sum[:]), "tls_version": tls.VersionName(state.Version), "cipher": tls.CipherSuiteName(state.CipherSuite), "alpn": state.NegotiatedProtocol, "key": publicKeyDescription(cert), "signature_algorithm": cert.SignatureAlgorithm.String(), "chain": chain}}, nil
+}
+
+func ipStrings(ips []net.IP) []string {
+	out := []string{}
+	for _, ip := range ips {
+		out = append(out, ip.String())
+	}
+	return out
+}
+
+func publicKeyDescription(cert *x509.Certificate) string {
+	switch key := cert.PublicKey.(type) {
+	case *rsa.PublicKey:
+		return fmt.Sprintf("RSA %d-bit", key.N.BitLen())
+	case *ecdsa.PublicKey:
+		return "ECDSA " + key.Curve.Params().Name
+	case ed25519.PublicKey:
+		return "Ed25519"
+	default:
+		return cert.PublicKeyAlgorithm.String()
+	}
 }
 func (e *Engine) Ping(ctx context.Context, r Request, emit Emit) (Result, error) {
-	defaultPort := "443"
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Input)), "http://") {
-		defaultPort = "80"
-	}
-	host, port, err := splitHostPort(r.Input, defaultPort)
+	host, port, err := splitHostPort(r.Input, "443")
 	if err != nil {
 		return Result{}, err
 	}
@@ -594,61 +720,29 @@ func (e *Engine) Ping(ctx context.Context, r Request, emit Emit) (Result, error)
 	}
 	return Result{Title: "TCP latency", Summary: net.JoinHostPort(host, port), Metrics: metrics, Table: table, Data: map[string]any{"host": host, "port": port, "attempts": count, "failed": failed, "samples_ms": samples}, Notes: []string{"TCP probes measure connection establishment, including DNS. Failure rate describes these connection attempts."}}, nil
 }
-func LocalPorts(ctx context.Context, r Request) (Result, error) {
-	port := r.Opt("port", "")
-	if port != "" {
-		n, err := strconv.Atoi(port)
-		if err != nil || n < 1 || n > 65535 {
-			return Result{}, fmt.Errorf("port must be 1–65535")
+
+var cdnByName = []struct{ name, suffix string }{
+	{"Cloudflare DNS", "ns.cloudflare.com"},
+	{"Amazon Route 53", "awsdns"},
+	{"Amazon CloudFront", "cloudfront.net"},
+	{"Fastly", "fastly.net"},
+	{"Akamai", "akamaiedge.net"},
+	{"Akamai", "edgekey.net"},
+	{"Vercel", "vercel-dns.com"},
+	{"Netlify", "netlify.app"},
+	{"GitHub Pages", "github.io"},
+	{"Azure Front Door", "azurefd.net"},
+	{"Google Cloud DNS", "googledomains.com"},
+	{"Heroku", "herokudns.com"},
+}
+
+func nameserversContain(ns []string, suffix string) bool {
+	for _, n := range ns {
+		if strings.Contains(strings.ToLower(n), suffix) {
+			return true
 		}
 	}
-	var cmd *exec.Cmd
-	if runtime.GOOS == "linux" {
-		cmd = exec.CommandContext(ctx, "ss", "-ltnp")
-	} else {
-		args := []string{"-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"}
-		if port != "" {
-			args[1] = "-iTCP:" + port
-		}
-		cmd = exec.CommandContext(ctx, "lsof", args...)
-	}
-	b, err := cmd.Output()
-	if err != nil {
-		if ex, ok := err.(*exec.ExitError); ok && ex.ExitCode() == 1 && len(b) == 0 {
-			return Result{Title: "Local listening ports", Summary: "No matching listeners", Output: "No listeners found."}, nil
-		}
-		return Result{}, fmt.Errorf("local port inspection requires lsof (macOS) or ss (Linux): %w", err)
-	}
-	if runtime.GOOS == "linux" {
-		lines := strings.Split(string(b), "\n")
-		if port != "" {
-			filtered := []string{}
-			for _, line := range lines {
-				fields := strings.Fields(line)
-				if len(fields) >= 4 && strings.HasSuffix(fields[3], ":"+port) {
-					filtered = append(filtered, line)
-				}
-			}
-			lines = filtered
-		}
-		return Result{Title: "Local listening ports", Output: strings.Join(lines, "\n")}, nil
-	}
-	table := &Table{Headers: []string{"PROCESS", "PID", "LISTENING ON"}}
-	pid, process := "", ""
-	for _, line := range strings.Split(string(b), "\n") {
-		if len(line) < 2 {
-			continue
-		}
-		switch line[0] {
-		case 'p':
-			pid = line[1:]
-		case 'c':
-			process = line[1:]
-		case 'n':
-			table.Rows = append(table.Rows, []string{process, pid, line[1:]})
-		}
-	}
-	return Result{Title: "Local listening ports", Summary: fmt.Sprintf("%d visible listeners", len(table.Rows)), Table: table, Data: table.Rows}, nil
+	return false
 }
 
 func hostingClues(d HTTPData, cname string, ns []string) []Row {
@@ -668,17 +762,35 @@ func hostingClues(d HTTPData, cname string, ns []string) []Row {
 		{"Next.js", strings.Contains(lowerBody, "/_next/") || strings.Contains(header.Get("X-Powered-By"), "Next.js"), "Next.js asset path / X-Powered-By"},
 		{"WordPress", strings.Contains(lowerBody, "/wp-content/") || strings.Contains(lowerBody, "/wp-includes/"), "WordPress asset paths"},
 		{"Shopify", strings.Contains(lowerBody, "cdn.shopify.com"), "Shopify asset hostname"},
+		{"Fastly", header.Get("X-Served-By") != "" && strings.Contains(header.Get("X-Served-By"), "cache-"), "X-Served-By cache header"},
+		{"Akamai", strings.Contains(strings.ToLower(header.Get("Server")), "akamai"), "Server response header"},
+		{"Google Cloud", strings.Contains(header.Get("Via"), "google") || header.Get("Server") == "gws" || header.Get("Server") == "Google Frontend", "Via / Server response header"},
+		{"Azure", header.Get("X-Azure-Ref") != "" || header.Get("X-MSEdge-Ref") != "", "X-Azure-Ref response header"},
+		{"Fly.io", header.Get("Fly-Request-Id") != "", "Fly-Request-Id response header"},
+		{"Render", header.Get("Rndr-Id") != "", "Rndr-Id response header"},
+		{"Nuxt", strings.Contains(lowerBody, "/_nuxt/"), "Nuxt asset path"},
+		{"Gatsby", strings.Contains(lowerBody, "___gatsby"), "Gatsby root element"},
+		{"Astro", strings.Contains(lowerBody, "/_astro/"), "Astro asset path"},
+		{"SvelteKit", strings.Contains(lowerBody, "/_app/immutable/"), "SvelteKit asset path"},
+		{"Drupal", strings.Contains(lowerBody, "/sites/default/files/") || strings.Contains(header.Get("X-Generator"), "Drupal"), "Drupal asset path / X-Generator"},
+		{"Squarespace", strings.Contains(lowerBody, "static1.squarespace.com"), "Squarespace asset hostname"},
+		{"Wix", strings.Contains(lowerBody, "static.wixstatic.com"), "Wix asset hostname"},
+		{"Webflow", strings.Contains(lowerBody, "assets.website-files.com") || strings.Contains(lowerBody, "data-wf-site"), "Webflow markup"},
+		{"Ghost", header.Get("X-Ghost-Cache-Status") != "" || strings.Contains(lowerBody, `content="ghost`), "Ghost header / generator tag"},
+		{"HSTS enabled", header.Get("Strict-Transport-Security") != "", "Strict-Transport-Security header"},
+		{"HTTP/3 advertised", strings.Contains(header.Get("Alt-Svc"), "h3"), "Alt-Svc response header"},
 	}
 	for _, h := range hints {
 		if h.match {
 			clues = append(clues, row(h.name, h.evidence))
 		}
 	}
-	if cname != "" {
-		clues = append(clues, row("Canonical hostname", cname))
-	}
-	if len(ns) > 0 {
-		clues = append(clues, row("Nameservers", strings.Join(ns, ", ")))
+	seen := map[string]bool{}
+	for _, h := range cdnByName {
+		if !seen[h.name] && ((cname != "" && strings.Contains(cname, h.suffix)) || nameserversContain(ns, h.suffix)) {
+			seen[h.name] = true
+			clues = append(clues, row(h.name, "DNS points to "+h.suffix))
+		}
 	}
 	for _, key := range []string{"Server", "X-Powered-By", "Via"} {
 		if v := header.Get(key); v != "" {
@@ -687,6 +799,9 @@ func hostingClues(d HTTPData, cname string, ns []string) []Row {
 	}
 	return clues
 }
+
+var titlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
 func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error) {
 	host, err := hostname(r.Input)
 	if err != nil {
@@ -726,7 +841,10 @@ func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error)
 		case "ips":
 			ips = o.value.([]net.IPAddr)
 		case "cname":
-			cname = strings.TrimSuffix(o.value.(string), ".")
+			// The resolver returns the queried name itself when no CNAME exists.
+			if v := strings.ToLower(strings.TrimSuffix(o.value.(string), ".")); v != host {
+				cname = v
+			}
 		case "ns":
 			for _, n := range o.value.([]*net.NS) {
 				nameservers = append(nameservers, strings.TrimSuffix(n.Host, "."))
@@ -740,7 +858,7 @@ func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error)
 	for _, ip := range ips {
 		ipStrings = append(ipStrings, ip.IP.String())
 	}
-	sections := []Section{{Title: "DNS", Rows: []Row{row("Host", host), row("Addresses", strings.Join(ipStrings, ", ")), row("Canonical name", cname), row("Nameservers", strings.Join(nameservers, ", "))}}}
+	sections := []Section{{Title: "DNS", Rows: []Row{row("Host", host), row("Addresses", strings.Join(ipStrings, ", ")), row("CNAME", nonempty(cname, "none")), row("Nameservers", strings.Join(nameservers, ", "))}}}
 	var network *IPData
 	if len(ips) > 0 {
 		report(emit, Progress{Message: "Looking up network ownership", Fraction: .7})
@@ -765,8 +883,7 @@ func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error)
 			clues = append(clues, row("Technology", "No recognizable evidence exposed"))
 		}
 		sections = append(sections, Section{Title: "HOSTING & TECHNOLOGY CLUES", Rows: clues})
-		titleRe := regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
-		if match := titleRe.FindStringSubmatch(httpData.Body); len(match) > 1 {
+		if match := titlePattern.FindStringSubmatch(httpData.Body); len(match) > 1 {
 			sections = append(sections, Section{Title: "PAGE", Rows: []Row{row("Title", html.UnescapeString(strings.TrimSpace(match[1])))}})
 		}
 		sections = append(sections, httpSections(httpData)...)

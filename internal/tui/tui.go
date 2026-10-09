@@ -38,21 +38,36 @@ type formField struct {
 	area          textarea.Model
 	multiline     bool
 	rejectedInput bool
+	checked       bool
 }
 
+func (f *formField) isToggle() bool { return f.spec.Kind == core.BoolField }
+
 func (f *formField) value() string {
+	if f.isToggle() {
+		if f.checked {
+			return "true"
+		}
+		return "false"
+	}
 	if f.multiline {
 		return f.area.Value()
 	}
 	return f.input.Value()
 }
 func (f *formField) focus() tea.Cmd {
+	if f.isToggle() {
+		return nil
+	}
 	if f.multiline {
 		return f.area.Focus()
 	}
 	return f.input.Focus()
 }
 func (f *formField) blur() {
+	if f.isToggle() {
+		return
+	}
 	if f.multiline {
 		f.area.Blur()
 	} else {
@@ -68,7 +83,13 @@ type jobEvent struct {
 	done     bool
 }
 type tickMsg struct{ id int }
-type clipboardMsg struct{ err error }
+type clipboardMsg struct {
+	err   error
+	osc52 string
+}
+
+func hasCommand(name string) bool { _, err := exec.LookPath(name); return err == nil }
+
 type clearToastMsg struct{ text string }
 type Model struct {
 	engine        *core.Engine
@@ -179,6 +200,9 @@ func (m *Model) resize() {
 	width := max(m.width-8, 20)
 	m.search.SetWidth(max(10, width-7))
 	for i := range m.fields {
+		if m.fields[i].isToggle() {
+			continue
+		}
 		if m.fields[i].multiline {
 			m.fields[i].area.SetWidth(max(10, width-8))
 			m.fields[i].area.SetHeight(min(5, max(2, m.height-19)))
@@ -209,7 +233,9 @@ func (m *Model) openTool(tool core.Tool) tea.Cmd {
 				value = v
 			}
 		}
-		if multiline {
+		if field.isToggle() {
+			field.checked = value == "true"
+		} else if multiline {
 			field.area = textarea.New()
 			field.area.Placeholder = spec.Placeholder
 			field.area.Prompt = "│ "
@@ -327,14 +353,22 @@ func copyText(text string) tea.Cmd {
 		case "windows":
 			cmd = exec.CommandContext(ctx, "clip.exe")
 		default:
-			if _, err := exec.LookPath("wl-copy"); err == nil {
+			switch {
+			case os.Getenv("WAYLAND_DISPLAY") != "" && hasCommand("wl-copy"):
 				cmd = exec.CommandContext(ctx, "wl-copy")
-			} else {
+			case hasCommand("xclip"):
 				cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard")
+			case hasCommand("xsel"):
+				cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
+			case hasCommand("wl-copy"):
+				cmd = exec.CommandContext(ctx, "wl-copy")
+			default:
+				// OSC 52 lets terminals (including over SSH) set the clipboard.
+				return clipboardMsg{osc52: text}
 			}
 		}
 		cmd.Stdin = strings.NewReader(text)
-		return clipboardMsg{cmd.Run()}
+		return clipboardMsg{err: cmd.Run()}
 	}
 }
 func (m *Model) toastCmd(text string) tea.Cmd {
@@ -367,7 +401,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyPressMsg:
 			text = input.Text
 		}
-		if text != "" {
+		if text != "" && !m.fields[m.focus].isToggle() {
 			field := &m.fields[m.focus]
 			limit := field.input.CharLimit
 			if field.multiline {
@@ -394,6 +428,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clipboardMsg:
 		if msg.err != nil {
 			return m, m.toastCmd("Clipboard unavailable: " + msg.err.Error())
+		}
+		if msg.osc52 != "" {
+			return m, tea.Batch(tea.SetClipboard(msg.osc52), m.toastCmd("Sent to the terminal clipboard"))
 		}
 		return m, m.toastCmd("Copied to clipboard")
 	case tickMsg:
@@ -515,6 +552,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.fields) == 0 || !m.fields[m.focus].multiline {
 					return m, m.start()
 				}
+			case "space", " ", "x":
+				if len(m.fields) > 0 && m.fields[m.focus].isToggle() {
+					m.fields[m.focus].checked = !m.fields[m.focus].checked
+					return m, nil
+				}
+			}
+			if len(m.fields) > 0 && m.fields[m.focus].isToggle() {
+				return m, nil
 			}
 		}
 		if m.screen == running && key == "esc" {
@@ -551,6 +596,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					value := render.Result(m.result, 120, false)
 					if m.result.Output != "" {
 						value = m.result.Output
+					}
+					if m.result.RawOutput != "" {
+						value = m.result.RawOutput
 					}
 					if m.jsonView {
 						value = core.PrettyJSON(m.result)
@@ -706,11 +754,22 @@ func (m *Model) formView(width, height int) string {
 			label = "  " + label
 		}
 		b.WriteString(style(color).Bold(i == m.focus).Render(label) + "\n")
-		view := field.input.View()
-		if field.multiline {
-			view = field.area.View()
+		if field.isToggle() {
+			box := "[ ] off"
+			if field.checked {
+				box = "[x] on"
+			}
+			boxStyle := style(render.Muted)
+			if i == m.focus {
+				boxStyle = style(render.Teal).Bold(true)
+				box += "   space toggles"
+			}
+			b.WriteString("  " + boxStyle.Render(box) + "\n")
+		} else if field.multiline {
+			b.WriteString(field.area.View() + "\n")
+		} else {
+			b.WriteString(field.input.View() + "\n")
 		}
-		b.WriteString(view + "\n")
 		if field.spec.Help != "" {
 			b.WriteString(style(render.Faint).Render("  "+field.spec.Help) + "\n")
 		}
@@ -764,7 +823,7 @@ func (m *Model) View() tea.View {
 		footer = "↑↓ select   enter open   tab category   ctrl+f favorite   esc quit"
 	case form:
 		content = m.formView(width, bodyHeight)
-		footer = "tab next field   ctrl+r run   enter run / new line   esc back"
+		footer = "tab next field   space toggle   ctrl+r run   enter run / new line   esc back"
 	case running:
 		content = m.runningView(width, bodyHeight)
 		footer = "esc cancel   ctrl+c quit"

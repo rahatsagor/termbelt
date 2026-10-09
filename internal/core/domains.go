@@ -5,9 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,6 +38,8 @@ type Registry struct {
 	tlds      []string
 	gates     map[string]chan struct{}
 	cooldowns map[string]time.Time
+	// queryWhois replaces the TCP port 43 client in tests.
+	queryWhois func(ctx context.Context, server, query string) (string, error)
 }
 
 func NewRegistry(client *http.Client) *Registry {
@@ -300,6 +300,9 @@ func (r *Registry) acquire(ctx context.Context, endpoint string) (func(), error)
 		r.mu.Unlock()
 		return nil, fmt.Errorf("registry rate limited; retry after %s", until.UTC().Format(time.RFC3339))
 	}
+	if r.gates == nil {
+		r.gates = map[string]chan struct{}{}
+	}
 	gate, ok := r.gates[u.Host]
 	if !ok {
 		gate = make(chan struct{}, 1)
@@ -380,24 +383,41 @@ func (r *Registry) lookupOrder(domains []string) []int {
 }
 
 type RDAPLookup struct {
-	Domain string         `json:"domain"`
-	State  string         `json:"state"`
-	Source string         `json:"source,omitempty"`
-	Reason string         `json:"reason,omitempty"`
-	Raw    map[string]any `json:"record,omitempty"`
+	Domain    string         `json:"domain"`
+	State     string         `json:"state"`
+	Protocol  string         `json:"protocol,omitempty"`
+	Source    string         `json:"source,omitempty"`
+	Reason    string         `json:"reason,omitempty"`
+	Registrar string         `json:"registrar,omitempty"`
+	Raw       map[string]any `json:"record,omitempty"`
 }
 
+// Lookup checks the authoritative RDAP service, or the registry's legacy
+// WHOIS server when IANA publishes no RDAP service for the TLD.
 func (r *Registry) Lookup(ctx context.Context, domain string) RDAPLookup {
+	result := r.lookupRDAP(ctx, domain)
+	if result.Protocol == "" && result.State == "unknown" && ctx.Err() == nil {
+		tld := domain[strings.LastIndex(domain, ".")+1:]
+		if server, _ := r.whoisServer(ctx, tld, false); server != "" {
+			return r.lookupWhois(ctx, domain, server)
+		}
+		result.Reason = "No RDAP or WHOIS service published by IANA for ." + tld
+	}
+	return result
+}
+
+func (r *Registry) lookupRDAP(ctx context.Context, domain string) RDAPLookup {
 	result := RDAPLookup{Domain: domain, State: "unknown"}
 	if err := r.ensure(ctx); err != nil {
 		result.Reason = err.Error()
+		result.Protocol = "rdap"
 		return result
 	}
 	endpoint := r.endpoint(domain)
 	if endpoint == "" {
-		result.Reason = "No authoritative RDAP endpoint published by IANA"
 		return result
 	}
+	result.Protocol = "rdap"
 	result.Source = endpoint
 	release, err := r.acquire(ctx, endpoint)
 	if err != nil {
@@ -409,7 +429,7 @@ func (r *Registry) Lookup(ctx context.Context, domain string) RDAPLookup {
 	defer cancel()
 	req, _ := http.NewRequestWithContext(queryCtx, "GET", endpoint+"/domain/"+url.PathEscape(domain), nil)
 	req.Header.Set("Accept", "application/rdap+json, application/json")
-	req.Header.Set("User-Agent", "termbelt/1.0")
+	req.Header.Set("User-Agent", UserAgent)
 	resp, err := r.client.Do(req)
 	if err != nil {
 		result.Reason = err.Error()
@@ -572,11 +592,17 @@ func (e *Engine) Domains(ctx context.Context, req Request, emit Emit) (Result, e
 		}
 		detail := r.Reason
 		if r.State == "registered" {
-			detail = rdapRegistrar(r.Raw)
+			detail = nonempty(r.Registrar, "Registry record found")
+			if r.Raw != nil {
+				detail = rdapRegistrar(r.Raw)
+			}
+		}
+		if r.Protocol == "whois" && !strings.Contains(detail, "WHOIS") {
+			detail += " (WHOIS)"
 		}
 		table.Rows = append(table.Rows, []string{r.Domain, r.State, detail})
 	}
-	return Result{Title: "Domain availability", Summary: fmt.Sprintf("%d checked · %d unregistered · %d registered · %d unknown", len(results), counts["unregistered"], counts["registered"], counts["unknown"]), Metrics: []Metric{{Label: "UNREGISTERED", Value: fmt.Sprint(counts["unregistered"])}, {Label: "REGISTERED", Value: fmt.Sprint(counts["registered"])}, {Label: "UNKNOWN", Value: fmt.Sprint(counts["unknown"])}}, Table: table, Data: map[string]any{"counts": counts, "domains": results}, Notes: []string{"Unregistered means no authoritative RDAP record. Reserved, premium, brand and restricted TLD names may still be unavailable to register. Confirm with a registrar.", "All-TLD mode covers IANA's root-zone TLD list. TLDs without RDAP, rate limits and network failures are marked unknown. Multi-label suffixes can be supplied explicitly with --tlds.", "Only public IANA metadata is cached. Domain queries and results are not saved. Run with --refresh to update the bundled registry list."}}, nil
+	return Result{Title: "Domain availability", Summary: fmt.Sprintf("%d checked · %d unregistered · %d registered · %d unknown", len(results), counts["unregistered"], counts["registered"], counts["unknown"]), Metrics: []Metric{{Label: "UNREGISTERED", Value: fmt.Sprint(counts["unregistered"])}, {Label: "REGISTERED", Value: fmt.Sprint(counts["registered"])}, {Label: "UNKNOWN", Value: fmt.Sprint(counts["unknown"])}}, Table: table, Data: map[string]any{"counts": counts, "domains": results}, Notes: []string{"Unregistered means the authoritative registry has no registration record (RDAP, or legacy WHOIS for TLDs without RDAP). Reserved, premium, brand and restricted names may still be unavailable to register. Confirm with a registrar.", "All-TLD mode covers IANA's root-zone TLD list. Unrecognized WHOIS replies, rate limits and network failures are marked unknown. Multi-label suffixes can be supplied explicitly with --tlds.", "Only public IANA metadata is cached. Domain queries and results are not saved. Run with --refresh to update the bundled registry list."}}, nil
 }
 func str(v any) string {
 	if s, ok := v.(string); ok {
@@ -679,32 +705,12 @@ func rdapSections(d RDAPLookup) []Section {
 	}
 	return sections
 }
-func queryWhois(ctx context.Context, server, query string) (string, error) {
-	dialer := net.Dialer{Timeout: 5 * time.Second}
-	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(server, "43"))
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-	deadline := time.Now().Add(8 * time.Second)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
-	}
-	conn.SetDeadline(deadline)
-	stop := context.AfterFunc(ctx, func() { conn.Close() })
-	defer stop()
-	if _, err = io.WriteString(conn, query+"\r\n"); err != nil {
-		return "", err
-	}
-	b, err := readLimited(conn, 1<<20)
-	return string(b), err
-}
 func (e *Engine) Whois(ctx context.Context, r Request) (Result, error) {
 	domain, err := registrable(r.Input)
 	if err != nil {
 		return Result{}, err
 	}
-	lookup := e.RDAP.Lookup(ctx, domain)
+	lookup := e.RDAP.lookupRDAP(ctx, domain)
 	if lookup.State == "registered" {
 		result := Result{Title: "WHOIS / RDAP", Summary: domain, Sections: rdapSections(lookup), Data: lookup.Raw, Notes: []string{"Registration data comes from the authoritative registry. Privacy-protected contact details may be redacted."}}
 		links, _ := lookup.Raw["links"].([]any)
@@ -725,7 +731,7 @@ func (e *Engine) Whois(ctx context.Context, r Request) (Result, error) {
 				result.Notes = append(result.Notes, "Registrar detail lookup: "+fetchErr.Error())
 				break
 			}
-			if str(registrar["objectClassName"]) != "domain" || !strings.EqualFold(str(registrar["ldhName"]), domain) {
+			if str(registrar["objectClassName"]) != "domain" || !strings.EqualFold(strings.TrimSuffix(str(registrar["ldhName"]), "."), domain) {
 				result.Notes = append(result.Notes, "Registrar detail response did not match this domain.")
 				break
 			}
@@ -748,28 +754,38 @@ func (e *Engine) Whois(ctx context.Context, r Request) (Result, error) {
 	if ctx.Err() != nil {
 		return Result{}, ctx.Err()
 	}
+	reason := nonempty(lookup.Reason, "no RDAP service published by IANA")
 	tld := domain[strings.LastIndex(domain, ".")+1:]
-	root, err := queryWhois(ctx, "whois.iana.org", tld)
+	server, err := e.RDAP.whoisServer(ctx, tld, true)
 	if err != nil {
-		return Result{}, fmt.Errorf("RDAP inconclusive (%s); WHOIS fallback unavailable: %w", lookup.Reason, err)
-	}
-	server := ""
-	for _, line := range strings.Split(root, "\n") {
-		key, value, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(key), "whois") {
-			server = strings.TrimSpace(value)
-			break
-		}
+		return Result{}, fmt.Errorf("RDAP inconclusive (%s); WHOIS fallback unavailable: %w", reason, err)
 	}
 	if server == "" {
-		return Result{}, fmt.Errorf("RDAP inconclusive (%s); IANA has no legacy WHOIS server for .%s", lookup.Reason, tld)
+		return Result{}, fmt.Errorf("RDAP inconclusive (%s); IANA has no legacy WHOIS server for .%s", reason, tld)
 	}
-	if _, err = domainASCII(server); err != nil {
-		return Result{}, fmt.Errorf("invalid WHOIS referral")
-	}
-	text, err := queryWhois(ctx, server, domain)
+	release, err := e.RDAP.acquire(ctx, "whois://"+server)
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Title: "Legacy WHOIS", Summary: domain + " · " + server, Output: text, Data: map[string]string{"domain": domain, "server": server, "whois": text}, Notes: []string{"Legacy WHOIS uses unencrypted TCP port 43. Returned fields depend on the registry."}}, nil
+	text, err := e.RDAP.whoisQuery(ctx, server, domain)
+	release()
+	if err != nil {
+		return Result{}, err
+	}
+	state, detail := classifyWhois(domain, text)
+	rows := []Row{row("Domain", domain), row("Status", state), row("Detail", detail), row("WHOIS server", server)}
+	for _, field := range []struct {
+		label string
+		keys  []string
+	}{
+		{"Registrar", []string{"registrar", "registrar name", "sponsoring registrar", "registrar organization"}},
+		{"Created", []string{"creation date", "created", "created on", "registered", "registered on", "registration date", "record created"}},
+		{"Updated", []string{"updated date", "last updated", "changed", "last modified", "modified"}},
+		{"Expires", []string{"registry expiry date", "registrar registration expiration date", "expiration date", "expiry date", "expires", "expires on", "paid-till"}},
+	} {
+		if v := whoisField(text, field.keys...); v != "" {
+			rows = append(rows, row(field.label, v))
+		}
+	}
+	return Result{Title: "Legacy WHOIS", Summary: domain + " · " + state + " · " + server, Sections: []Section{{Title: "REGISTRATION", Rows: rows}, {Title: "WHOIS RESPONSE", Text: text}}, Data: map[string]string{"domain": domain, "state": state, "server": server, "whois": text}, Notes: []string{"Legacy WHOIS uses unencrypted TCP port 43. Returned fields depend on the registry.", "RDAP was unavailable: " + reason}}, nil
 }

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,18 +20,20 @@ import (
 )
 
 type SpeedData struct {
-	Provider           string   `json:"provider"`
-	DownloadMbps       float64  `json:"download_mbps"`
-	UploadMbps         *float64 `json:"upload_mbps,omitempty"`
-	LatencyMS          float64  `json:"http_latency_ms"`
-	DownloadedBytes    int64    `json:"downloaded_bytes"`
-	UploadedBytes      int64    `json:"uploaded_bytes"`
-	DownloadSeconds    float64  `json:"download_seconds"`
-	UploadSeconds      float64  `json:"upload_seconds,omitempty"`
-	Servers            []string `json:"servers"`
-	DownloadStopReason string   `json:"download_stop_reason"`
-	UploadStopReason   string   `json:"upload_stop_reason,omitempty"`
-	Partial            bool     `json:"partial"`
+	Provider           string    `json:"provider"`
+	DownloadMbps       float64   `json:"download_mbps"`
+	UploadMbps         *float64  `json:"upload_mbps,omitempty"`
+	LatencyMS          float64   `json:"http_latency_ms"`
+	JitterMS           float64   `json:"http_jitter_ms"`
+	LatencySamplesMS   []float64 `json:"http_latency_samples_ms"`
+	DownloadedBytes    int64     `json:"downloaded_bytes"`
+	UploadedBytes      int64     `json:"uploaded_bytes"`
+	DownloadSeconds    float64   `json:"download_seconds"`
+	UploadSeconds      float64   `json:"upload_seconds,omitempty"`
+	Servers            []string  `json:"servers"`
+	DownloadStopReason string    `json:"download_stop_reason"`
+	UploadStopReason   string    `json:"upload_stop_reason,omitempty"`
+	Partial            bool      `json:"partial"`
 }
 
 var fastScriptPattern = regexp.MustCompile(`<script[^>]+src=["']([^"']*app[^"']*\.js)["']`)
@@ -154,7 +158,7 @@ func (e *Engine) transferDetailed(ctx context.Context, targets []string, upload 
 	}
 	// Reserve each connection's first request before starting workers so even a
 	// small data budget measures concurrent throughput.
-	var transferred, reserved atomic.Int64
+	var transferred, reserved, lastCompletion atomic.Int64
 	first := make([]int64, workers)
 	payloads := make([][]byte, workers)
 	for i := range first {
@@ -208,7 +212,7 @@ func (e *Engine) transferDetailed(ctx context.Context, targets []string, upload 
 					errors <- err
 					return
 				}
-				req.Header.Set("User-Agent", "termbelt/1.0")
+				req.Header.Set("User-Agent", UserAgent)
 				req.Header.Set("Accept-Encoding", "identity")
 				req.Header.Set("Cache-Control", "no-cache")
 				if upload {
@@ -241,6 +245,7 @@ func (e *Engine) transferDetailed(ctx context.Context, targets []string, upload 
 					_, err = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 					if err == nil {
 						transferred.Add(size)
+						lastCompletion.Store(int64(time.Since(start)))
 					}
 				} else {
 					var n int64
@@ -285,6 +290,12 @@ func (e *Engine) transferDetailed(ctx context.Context, targets []string, upload 
 			report(emit, Progress{Message: fmt.Sprintf("Measuring %s · %.1f MiB transferred", strings.ToLower(label), float64(transferred.Load())/(1<<20)), Fraction: min(elapsed/seconds.Seconds(), 1), Metrics: []Metric{{Label: label, Value: fmt.Sprintf("%.1f", mbps), Unit: "Mbps"}}})
 		case <-done:
 			elapsed := time.Since(start).Seconds()
+			// Upload bytes count only when the server acknowledges a whole
+			// request, so time spent on requests cut off by the deadline must
+			// not dilute the rate.
+			if upload && lastCompletion.Load() > 0 {
+				elapsed = time.Duration(lastCompletion.Load()).Seconds()
+			}
 			stats := transferStats{bytes: transferred.Load(), seconds: elapsed, stopReason: "byte-limit"}
 			close(errors)
 			for err := range errors {
@@ -308,31 +319,65 @@ func (e *Engine) transferDetailed(ctx context.Context, targets []string, upload 
 		}
 	}
 }
-func (e *Engine) measureLatency(ctx context.Context, target string) (float64, error) {
+
+type latencyStats struct {
+	median, jitter float64
+	samples        []float64
+}
+
+// measureLatency discards a warm-up request, whose DNS, TCP and TLS setup
+// would otherwise inflate the result, then reports the median of the rest.
+func (e *Engine) measureLatency(ctx context.Context, target string) (latencyStats, error) {
 	samples := []float64{}
 	client := *e.Client
 	client.Timeout = 5 * time.Second
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		start := time.Now()
 		req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
 		if err != nil {
-			return 0, err
+			return latencyStats{}, err
 		}
+		req.Header.Set("User-Agent", UserAgent)
+		req.Header.Set("Cache-Control", "no-cache")
 		resp, err := client.Do(req)
 		if err != nil {
-			return 0, err
+			return latencyStats{}, err
 		}
 		_, readErr := io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
 		resp.Body.Close()
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return 0, fmt.Errorf("latency endpoint returned HTTP %d", resp.StatusCode)
+			return latencyStats{}, fmt.Errorf("latency endpoint returned HTTP %d", resp.StatusCode)
 		}
 		if readErr != nil {
-			return 0, readErr
+			return latencyStats{}, readErr
 		}
-		samples = append(samples, float64(time.Since(start).Microseconds())/1000)
+		if i > 0 {
+			samples = append(samples, float64(time.Since(start).Microseconds())/1000)
+		}
 	}
-	return (samples[0] + samples[1] + samples[2]) / 3, nil
+	return summarizeLatency(samples), nil
+}
+
+func summarizeLatency(samples []float64) latencyStats {
+	stats := latencyStats{samples: append([]float64(nil), samples...)}
+	if len(samples) == 0 {
+		return stats
+	}
+	jitter := 0.
+	for i := 1; i < len(samples); i++ {
+		jitter += math.Abs(samples[i] - samples[i-1])
+	}
+	if len(samples) > 1 {
+		stats.jitter = jitter / float64(len(samples)-1)
+	}
+	sorted := append([]float64(nil), samples...)
+	sort.Float64s(sorted)
+	if n := len(sorted); n%2 == 1 {
+		stats.median = sorted[n/2]
+	} else {
+		stats.median = (sorted[n/2-1] + sorted[n/2]) / 2
+	}
+	return stats
 }
 func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error) {
 	provider := strings.ToLower(r.Opt("provider", "fast"))
@@ -360,22 +405,23 @@ func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error
 		latencyTarget = u.String()
 	}
 	report(emit, Progress{Message: "Measuring unloaded HTTP latency", Fraction: 0})
-	latency, err := e.measureLatency(ctx, latencyTarget)
+	latencyResult, err := e.measureLatency(ctx, latencyTarget)
 	if err != nil {
 		return Result{}, err
 	}
+	latency := latencyResult.median
 	download, err := e.transferDetailed(ctx, targets, false, time.Duration(seconds)*time.Second, int64(maxMB)<<20, emit)
 	if err != nil {
 		return Result{}, err
 	}
 	downloaded, downloadSeconds := download.bytes, download.seconds
-	data := SpeedData{Provider: provider, DownloadMbps: float64(downloaded) * 8 / downloadSeconds / 1e6, LatencyMS: latency, DownloadedBytes: downloaded, DownloadSeconds: downloadSeconds, Servers: []string{}, DownloadStopReason: download.stopReason, Partial: len(download.failures) > 0}
+	data := SpeedData{Provider: provider, DownloadMbps: float64(downloaded) * 8 / downloadSeconds / 1e6, LatencyMS: latency, JitterMS: latencyResult.jitter, LatencySamplesMS: latencyResult.samples, DownloadedBytes: downloaded, DownloadSeconds: downloadSeconds, Servers: []string{}, DownloadStopReason: download.stopReason, Partial: len(download.failures) > 0}
 	for _, target := range targets {
 		u, _ := url.Parse(target)
 		data.Servers = append(data.Servers, u.Hostname())
 	}
-	metrics := []Metric{{Label: "DOWNLOAD", Value: fmt.Sprintf("%.1f", data.DownloadMbps), Unit: "Mbps"}, {Label: "HTTP LATENCY", Value: fmt.Sprintf("%.1f", latency), Unit: "ms"}}
-	notes := []string{fmt.Sprintf("Transfers stop after %d seconds or %d MiB per direction, whichever comes first. Throughput is an aggregate average across up to three HTTPS connections.", seconds, maxMB), "HTTP latency includes server response time and is measured before the transfer; this test does not measure packet loss or loaded latency."}
+	metrics := []Metric{{Label: "DOWNLOAD", Value: fmt.Sprintf("%.1f", data.DownloadMbps), Unit: "Mbps"}, {Label: "HTTP LATENCY", Value: fmt.Sprintf("%.1f", latency), Unit: "ms"}, {Label: "JITTER", Value: fmt.Sprintf("%.1f", latencyResult.jitter), Unit: "ms"}}
+	notes := []string{fmt.Sprintf("Transfers stop after %d seconds or %d MiB per direction, whichever comes first. Throughput is an aggregate average across up to three HTTPS connections.", seconds, maxMB), "HTTP latency is the median of five requests on a warm connection, measured before the transfer; it includes server response time. Jitter is the mean change between consecutive samples. Packet loss and loaded latency are not measured."}
 	for _, failure := range download.failures {
 		notes = append(notes, "Partial download measurement: "+failure)
 	}
@@ -407,5 +453,5 @@ func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error
 	if downloadSeconds < 2 {
 		notes = append(notes, "The download reached its data limit in under two seconds; increase --max-mb for a more stable measurement.")
 	}
-	return Result{Title: "Internet speed", Summary: map[string]string{"fast": "Fast.com · Netflix CDN", "cloudflare": "Cloudflare edge network"}[provider], Metrics: metrics, Sections: []Section{{Title: "MEASUREMENT", Rows: []Row{row("Servers", strings.Join(data.Servers, ", ")), row("Downloaded", fmt.Sprintf("%.2f MiB", float64(downloaded)/(1<<20))), row("Download elapsed", fmt.Sprintf("%.2f s", downloadSeconds)), row("Uploaded", fmt.Sprintf("%.2f MiB", float64(data.UploadedBytes)/(1<<20)))}}}, Notes: notes, Data: data}, nil
+	return Result{Title: "Internet speed", Summary: map[string]string{"fast": "Fast.com · Netflix CDN", "cloudflare": "Cloudflare edge network"}[provider], Metrics: metrics, Sections: []Section{{Title: "MEASUREMENT", Rows: []Row{row("Servers", strings.Join(data.Servers, ", ")), row("Downloaded", fmt.Sprintf("%.2f MiB", float64(downloaded)/(1<<20))), row("Download elapsed", fmt.Sprintf("%.2f s", downloadSeconds)), row("Download stopped by", data.DownloadStopReason), row("Uploaded", fmt.Sprintf("%.2f MiB", float64(data.UploadedBytes)/(1<<20))), row("Upload elapsed", fmt.Sprintf("%.2f s", data.UploadSeconds)), row("Upload stopped by", nonempty(data.UploadStopReason, "not measured"))}}}, Notes: notes, Data: data}, nil
 }

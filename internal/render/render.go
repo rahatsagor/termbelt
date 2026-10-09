@@ -39,6 +39,10 @@ func Safe(s string) string {
 	}
 	return b.String()
 }
+
+// wrap breaks prose at spaces and splits only words longer than the width.
+func wrap(s string, width int) string { return ansi.Wrap(s, max(width, 1), "") }
+
 func colored(s string, color color.Color, bold, enabled bool) string {
 	if !enabled {
 		return s
@@ -51,7 +55,7 @@ func Result(r core.Result, width int, color bool) string {
 	b.WriteString(colored(Safe(r.Title), Accent, true, color))
 	b.WriteString("\n")
 	if r.Summary != "" {
-		b.WriteString(ansi.Hardwrap(colored(Safe(r.Summary), Muted, false, color), width, true))
+		b.WriteString(wrap(colored(Safe(r.Summary), Muted, false, color), width))
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
@@ -64,7 +68,7 @@ func Result(r core.Result, width int, color bool) string {
 			}
 			cards = append(cards, colored(value, Teal, true, color)+"  "+colored(Safe(m.Label), Muted, false, color))
 		}
-		b.WriteString(ansi.Hardwrap(strings.Join(cards, "    │    "), width, true))
+		b.WriteString(wrap(strings.Join(cards, "    │    "), width))
 		b.WriteString("\n\n")
 	}
 	if r.Output != "" {
@@ -89,7 +93,7 @@ func Result(r core.Result, width int, color bool) string {
 			if value == "" {
 				value = "—"
 			}
-			lines := strings.Split(ansi.Hardwrap(value, max(8, width-labelWidth-3), true), "\n")
+			lines := strings.Split(wrap(value, max(8, width-labelWidth-3)), "\n")
 			for i, line := range lines {
 				if i == 0 {
 					b.WriteString(colored(label, Muted, false, color) + "   " + line)
@@ -100,7 +104,7 @@ func Result(r core.Result, width int, color bool) string {
 			}
 		}
 		if section.Text != "" {
-			b.WriteString(ansi.Hardwrap(Safe(section.Text), width, true))
+			b.WriteString(wrap(Safe(section.Text), width))
 			b.WriteString("\n")
 		}
 		b.WriteString("\n")
@@ -110,7 +114,7 @@ func Result(r core.Result, width int, color bool) string {
 		b.WriteString("\n")
 	}
 	for _, note := range r.Notes {
-		wrapped := ansi.Hardwrap(Safe(note), width-2, true)
+		wrapped := wrap(Safe(note), width-2)
 		lines := strings.Split(wrapped, "\n")
 		for i, line := range lines {
 			prefix := "  "
@@ -163,9 +167,13 @@ func Table(table core.Table, width int, color bool) string {
 		h = ansi.Truncate(Safe(h), sizes[i], "…")
 		headers = append(headers, h+strings.Repeat(" ", max(0, sizes[i]-ansi.StringWidth(h))))
 	}
-	b.WriteString(colored(strings.Join(headers, "   "), Muted, true, color))
+	total := 3 * (n - 1)
+	for _, size := range sizes {
+		total += size
+	}
+	b.WriteString(colored(strings.TrimRight(strings.Join(headers, "   "), " "), Muted, true, color))
 	b.WriteString("\n")
-	b.WriteString(colored(strings.Repeat("─", min(width, available+3*(n-1))), Faint, false, color))
+	b.WriteString(colored(strings.Repeat("─", min(width, total)), Faint, false, color))
 	b.WriteString("\n")
 	for _, row := range table.Rows {
 		lines := make([][]string, n)
@@ -175,7 +183,7 @@ func Table(table core.Table, width int, color bool) string {
 			if i < len(row) {
 				value = Safe(row[i])
 			}
-			lines[i] = strings.Split(ansi.Hardwrap(value, sizes[i], true), "\n")
+			lines[i] = strings.Split(wrap(value, sizes[i]), "\n")
 			height = max(height, len(lines[i]))
 		}
 		for line := 0; line < height; line++ {
