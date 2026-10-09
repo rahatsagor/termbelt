@@ -47,6 +47,8 @@ jobs:
           if [ "$RUNNER_OS" = 'Windows' ]; then suffix='.exe'; fi
           go build -trimpath -ldflags='-s -w' -o "build/termbelt$suffix" .
           "build/termbelt$suffix" uuid --count 2 --json
+          "build/termbelt$suffix" ports --json > /dev/null
+          "build/termbelt$suffix" dns example.com --type A --json > /dev/null
 
   package:
     name: Package / ${{ matrix.os }}
