@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- Build with Go 1.27.2 and golang.org/x/net 0.60.0 for GO-2026-6617 (HTTP/2 HPACK encoder race).
+- Includes every change listed for 1.1.0, which was tagged but not published because the release vulnerability scan stopped it.
+
 ## 1.1.0
 
 - Domain checks fall back to the registry's legacy WHOIS server for TLDs without RDAP, so `.io`, `.co`, `.me`, `.sh` and about 160 other TLDs report real results instead of unknown. WHOIS replies are classified conservatively.
