@@ -58,7 +58,8 @@
     "edge-smoke": "python3 scripts/edge_smoke.py --binary build/termbelt",
     "vuln": "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...",
     "publish": "bun scripts/publish.cjs",
-    "notices": "bun scripts/notices.cjs"
+    "notices": "bun scripts/notices.cjs",
+    "homebrew": "bun scripts/homebrew.cjs"
   },
   "keywords": [
     "cli",

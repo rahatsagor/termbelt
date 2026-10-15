@@ -17,6 +17,8 @@ jobs:
     if: github.repository == 'rahatsagor/termbelt'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      HAS_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,3 +48,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: gh release create "$RELEASE_TAG" dist/releases/* --verify-tag --generate-notes --title "Termbelt $RELEASE_TAG"
+      # HOMEBREW_TAP_TOKEN (optional secret): a token with contents write access to rahatsagor/homebrew-tap.
+      - name: Update Homebrew tap
+        if: env.HAS_TAP_TOKEN == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          TAP="$RUNNER_TEMP/homebrew-tap"
+          gh repo clone rahatsagor/homebrew-tap "$TAP" -- --depth 1
+          mkdir -p "$TAP/Formula"
+          bun scripts/homebrew.cjs dist/releases/SHA256SUMS > "$TAP/Formula/termbelt.rb"
+          cd "$TAP"
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/termbelt.rb
+          if ! git diff --cached --quiet; then
+            git commit -m "termbelt ${RELEASE_TAG#v}"
+            git push
+          fi
