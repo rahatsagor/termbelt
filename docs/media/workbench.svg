@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="999" height="630" viewBox="0 0 999 630" role="img" aria-label="termbelt — workbench">
+<title>termbelt — workbench</title>
+<rect width="999" height="630" rx="12" fill="#10121c"/>
+<rect x=".5" y=".5" width="998" height="629" rx="11.5" fill="none" stroke="#2b2f45"/>
+<path d="M12 .5h975a11.5 11.5 0 0 1 11.5 11.5v22H.5V12A11.5 11.5 0 0 1 12 .5z" fill="#181a28"/>
+<circle cx="20" cy="17" r="5.5" fill="#f18383"/><circle cx="38" cy="17" r="5.5" fill="#ebc474"/><circle cx="56" cy="17" r="5.5" fill="#99c97c"/>
+<text x="499.5" y="21.5" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#7c809c">termbelt — workbench</text>
+<g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace" font-size="14.2">
+<text x="35.2" y="82.8" fill="#b8a1ff" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">▀</text>
+<rect x="43.8" y="69.5" width="8.6" height="17.5" fill="#c9f394"/>
+<text x="43.8" y="82.8" fill="#b8a1ff" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">▀</text>
+<text x="52.4" y="82.8" fill="#b8a1ff" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">▀</text>
+<text x="78.2" y="82.8" fill="#b8a1ff" font-weight="700" textLength="129.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">T E R M B E L T</text>
+<text x="800.6" y="82.8" fill="#9699b0" textLength="163.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">v1.2.0  ·  21 tools</text>
+<text x="35.2" y="100.3" fill="#555a73" textLength="172.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">YOUR DAILY WORKBENCH</text>
+<text x="35.2" y="117.8" fill="#363b53" textLength="928.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="18.0" y="152.8" fill="#e4e6ee" textLength="43.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  ⌕  </text>
+<rect x="61.0" y="139.5" width="8.6" height="17.5" fill="#e4e6ee"/>
+<text x="61.0" y="152.8" fill="#10121c" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">S</text>
+<text x="69.6" y="152.8" fill="#585858" textLength="834.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">earch tools, commands, or a task…                                                                </text>
+<text x="35.2" y="187.8" fill="#b8a1ff" font-weight="700" textLength="111.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">[ all tools ]</text>
+<text x="164.2" y="187.8" fill="#9699b0" textLength="60.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">network</text>
+<text x="241.6" y="187.8" fill="#9699b0" textLength="60.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">domains</text>
+<text x="319.0" y="187.8" fill="#9699b0" textLength="77.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">developer</text>
+<text x="413.6" y="187.8" fill="#9699b0" textLength="77.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">favorites</text>
+<text x="508.2" y="187.8" fill="#9699b0" textLength="51.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">recent</text>
+<rect x="35.2" y="209.5" width="154.8" height="17.5" fill="#191c2b"/>
+<text x="35.2" y="222.8" fill="#b8a1ff" font-weight="700" textLength="154.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">›   Internet speed</text>
+<rect x="190.0" y="209.5" width="344.0" height="17.5" fill="#191c2b"/>
+<text x="568.4" y="222.8" fill="#363b53" textLength="395.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">╭────────────────────────────────────────────╮</text>
+<rect x="35.2" y="227.0" width="455.8" height="17.5" fill="#191c2b"/>
+<text x="35.2" y="240.3" fill="#9699b0" textLength="455.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    Fast.com download or Cloudflare download + upload</text>
+<rect x="491.0" y="227.0" width="43.0" height="17.5" fill="#191c2b"/>
+<text x="568.4" y="240.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="240.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="257.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="257.8" fill="#67e8c9" textLength="223.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">NETWORK  /  NETWORK ACCESS</text>
+<text x="955.4" y="257.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="18.0" y="275.3" fill="#e4e6ee" textLength="550.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">      IP intelligence                                           </text>
+<text x="568.4" y="275.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="275.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="35.2" y="292.8" fill="#555a73" textLength="378.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    Your public IP, geolocation, ISP and ASN</text>
+<text x="568.4" y="292.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="292.8" fill="#e4e6ee" font-weight="700" textLength="120.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">Internet speed</text>
+<text x="955.4" y="292.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="310.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="310.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="18.0" y="327.8" fill="#e4e6ee" textLength="550.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">      Domain availability                                       </text>
+<text x="568.4" y="327.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="327.8" fill="#9699b0" textLength="283.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">Measure your connection with live</text>
+<text x="955.4" y="327.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="35.2" y="345.3" fill="#555a73" textLength="421.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    Check a name across popular or every IANA TLD</text>
+<text x="568.4" y="345.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="345.3" fill="#9699b0" textLength="335.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">throughput. Tests consume network data.</text>
+<text x="955.4" y="345.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="362.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="362.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="18.0" y="380.3" fill="#e4e6ee" textLength="550.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">      WHOIS / RDAP                                              </text>
+<text x="568.4" y="380.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="380.3" fill="#555a73" textLength="111.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">QUICK COMMAND</text>
+<text x="955.4" y="380.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="35.2" y="397.8" fill="#555a73" textLength="464.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    Registrar, dates, contacts, status and nameservers</text>
+<text x="568.4" y="397.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="397.8" fill="#b8a1ff" textLength="309.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">termbelt speed --provider cloudflare</text>
+<text x="955.4" y="397.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="415.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="415.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="18.0" y="432.8" fill="#e4e6ee" textLength="550.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">      Website intelligence                                      </text>
+<text x="568.4" y="432.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="432.8" fill="#9699b0" textLength="180.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">enter  open workbench</text>
+<text x="955.4" y="432.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="35.2" y="450.3" fill="#555a73" textLength="438.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">    Hosting clues, CDN, DNS, headers and technology</text>
+<text x="568.4" y="450.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="450.3" fill="#9699b0" textLength="189.2" lengthAdjust="spacingAndGlyphs" xml:space="preserve">ctrl+f toggle favorite</text>
+<text x="955.4" y="450.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="467.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="467.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="35.2" y="485.3" fill="#555a73" textLength="249.4" lengthAdjust="spacingAndGlyphs" xml:space="preserve">  21 results · type to search</text>
+<text x="568.4" y="485.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="585.6" y="485.3" fill="#555a73" textLength="215.0" lengthAdjust="spacingAndGlyphs" xml:space="preserve">One terminal. Fewer tabs.</text>
+<text x="955.4" y="485.3" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="502.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="955.4" y="502.8" fill="#363b53" textLength="8.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">│</text>
+<text x="568.4" y="520.3" fill="#363b53" textLength="395.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">╰────────────────────────────────────────────╯</text>
+<text x="35.2" y="555.3" fill="#363b53" textLength="928.8" lengthAdjust="spacingAndGlyphs" xml:space="preserve">────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="35.2" y="572.8" fill="#9699b0" textLength="567.6" lengthAdjust="spacingAndGlyphs" xml:space="preserve">↑↓ select   enter open   tab category   ctrl+f favorite   esc quit</text>
+</g>
+</svg>
