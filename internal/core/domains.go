@@ -365,6 +365,10 @@ func (r *Registry) lookupOrder(domains []string) []int {
 	for index, domain := range domains {
 		u, _ := url.Parse(r.endpoint(domain))
 		host := u.Host
+		if host == "" {
+			// TLDs without RDAP are queried over WHOIS; group them by that server instead.
+			host = "whois:" + bundledWhois[domain[strings.LastIndex(domain, ".")+1:]]
+		}
 		if _, ok := groups[host]; !ok {
 			keys = append(keys, host)
 		}

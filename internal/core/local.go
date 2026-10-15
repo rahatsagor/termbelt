@@ -106,6 +106,7 @@ func jsonTool(r Request) (Result, error) {
 	var text string
 	if len(compact) > 0 && compact[0] == '"' && json.Unmarshal(compact, &text) == nil {
 		result.RawOutput = text
+		result.HasRaw = true
 	}
 	return result, nil
 }
@@ -291,17 +292,14 @@ func jwtTool(r Request) (Result, error) {
 	}
 	claims := values[1].(map[string]any)
 	rows := []Row{}
-	status := "active"
+	var expired, notYetValid, invalidExp bool
 	for _, key := range []string{"iat", "nbf", "exp"} {
 		if val, ok := claims[key]; ok {
 			num, ok := val.(json.Number)
-			if !ok {
-				rows = append(rows, row(key, "invalid NumericDate"))
-				continue
-			}
 			f, err := num.Float64()
-			if err != nil || f > 253402300799 || f < 0 {
+			if !ok || err != nil || f > 253402300799 || f < 0 {
 				rows = append(rows, row(key, "invalid NumericDate"))
+				invalidExp = invalidExp || key == "exp"
 				continue
 			}
 			t := time.Unix(int64(f), 0)
@@ -309,19 +307,28 @@ func jwtTool(r Request) (Result, error) {
 			switch {
 			case key == "exp" && time.Now().After(t):
 				value += " · expired " + time.Since(t).Round(time.Second).String() + " ago"
-				status = "expired"
+				expired = true
 			case key == "exp":
 				value += " · expires in " + time.Until(t).Round(time.Second).String()
 			case key == "nbf" && time.Now().Before(t):
 				value += " · not valid yet"
-				status = "not yet valid"
+				notYetValid = true
 			case key == "iat" && time.Now().Before(t):
 				value += " · issued in the future"
 			}
 			rows = append(rows, row(key, value))
 		}
 	}
-	if _, ok := claims["exp"]; !ok {
+	_, hasExp := claims["exp"]
+	status := "active"
+	switch {
+	case invalidExp:
+		status = "invalid expiry"
+	case expired:
+		status = "expired"
+	case notYetValid:
+		status = "not yet valid"
+	case !hasExp:
 		status = "no expiry"
 	}
 	header := values[0].(map[string]any)

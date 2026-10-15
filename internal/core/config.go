@@ -175,10 +175,7 @@ func SaveConfig(c Config) error {
 // SaveFavorites preserves settings from disk, including when this run uses
 // temporary environment or command-line overrides.
 func SaveFavorites(favorites []string) error {
-	c, err := loadConfigFile()
-	if err != nil {
-		return err
-	}
+	c := loadRepairableConfig()
 	c.Favorites = favorites
 	return SaveConfig(c)
 }

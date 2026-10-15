@@ -88,7 +88,7 @@ func listListeners(ctx context.Context, filter int) ([]Listener, string, error) 
 		listeners, err := windowsListeners()
 		return listeners, "Windows TCP table", err
 	default:
-		args := []string{"-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"}
+		args := []string{"-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcnt"}
 		if filter != 0 {
 			args[1] = "-iTCP:" + strconv.Itoa(filter)
 		}
@@ -112,16 +112,17 @@ func splitListenAddress(address string) (string, int, bool) {
 	if err != nil || port < 1 || port > 65535 {
 		return "", 0, false
 	}
-	host := strings.Trim(address[:index], "[]")
-	if host == "*" {
-		host = "0.0.0.0"
+	host := address[:index]
+	// Strip the interface scope first: ss prints scoped IPv6 as [fe80::1]%eth0:22.
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i]
 	}
-	return host, port, true
+	return strings.Trim(host, "[]"), port, true
 }
 
 func parseLsof(output string) []Listener {
 	listeners := []Listener{}
-	pid, process := 0, ""
+	pid, process, ipv6 := 0, "", false
 	for _, line := range strings.Split(output, "\n") {
 		if len(line) < 2 {
 			continue
@@ -131,8 +132,16 @@ func parseLsof(output string) []Listener {
 			pid, _ = strconv.Atoi(line[1:])
 		case 'c':
 			process = line[1:]
+		case 't':
+			ipv6 = line[1:] == "IPv6"
 		case 'n':
 			if host, port, ok := splitListenAddress(line[1:]); ok {
+				if host == "*" {
+					host = "0.0.0.0"
+					if ipv6 {
+						host = "::"
+					}
+				}
 				listeners = append(listeners, Listener{Port: port, Address: host, Process: process, PID: pid})
 			}
 		}
@@ -153,9 +162,8 @@ func parseSS(output string) []Listener {
 		if !ok {
 			continue
 		}
-		// Strip interface scope, e.g. 127.0.0.53%lo.
-		if i := strings.IndexByte(host, '%'); i >= 0 {
-			host = host[:i]
+		if host == "*" {
+			host = "0.0.0.0"
 		}
 		matches := ssProcess.FindAllStringSubmatch(strings.Join(fields[5:], " "), -1)
 		if len(matches) == 0 {

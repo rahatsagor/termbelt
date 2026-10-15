@@ -142,7 +142,8 @@ func (r *Registry) lookupWhois(ctx context.Context, domain, server string) RDAPL
 }
 
 var (
-	whoisFree       = regexp.MustCompile(`(?im)(^\s*(domain\s+)?status\s*:\s*(free|available|not\s+registered|no\s+object\s+found)\b|^\s*available\s*:\s*yes\b|registration\s+status\s*:\s*available|\bis\s+free\b|\bis\s+available\s+for\s+(purchase|registration)\b)`)
+	whoisFree       = regexp.MustCompile(`(?im)(^\s*(domain\s+)?status\s*:\s*(free|available|not\s+registered|no\s+object\s+found)\b|^\s*available\s*:\s*yes\b|registration\s+status\s*:\s*available)`)
+	whoisFreeProse  = regexp.MustCompile(`(?i)(\bis\s+free\b|\bis\s+available\s+for\s+(purchase|registration)\b)`)
 	whoisNotFound   = regexp.MustCompile(`(?i)(no\s+match|not\s+found|no\s+data\s+found|no\s+entries\s+found|no\s+object\s+found|object\s+does\s+not\s+exist|queried\s+object\s+does\s+not\s+exist|has\s+not\s+been\s+registered|domain\s+is\s+not\s+registered|no\s+matching\s+record|nincs\s+talalat|no\s+record\s+found|was\s+not\s+found|not\s+known\s+in|object_not_found|^\s*no\s+found\s*$)`)
 	whoisRestricted = regexp.MustCompile(`(?i)(not\s+available\s+for\s+registration|prohibited\s+string|cannot\s+be\s+registered|can\s+not\s+be\s+registered|reserved\s+domain|usage\s+restriction|restricted\s+word|is\s+not\s+available|registration\s+status\s*:\s*invalid)`)
 	whoisRefused    = regexp.MustCompile(`(?i)(rate\s*limit|quota|exceeded|not\s+permitted|access\s+denied|too\s+many|try\s+again|invalid\s+(domain|pattern|query)|wrong\s+top\s+level|only\s+accepts|solo\s+acepta|tld\s+not\s+supported|blacklist)`)
@@ -158,7 +159,9 @@ func classifyWhois(domain, text string) (state, reason string) {
 		return "unknown", "Registry reports the name is reserved, restricted or unavailable"
 	}
 	evidence := whoisRegistered.MatchString(text) && strings.Contains(strings.ToLower(text), strings.ToLower(domain))
-	if whoisFree.MatchString(text) {
+	// Prose such as "is free" can also appear in a registered record's disclaimer,
+	// so it only counts when the reply has no registration fields.
+	if whoisFree.MatchString(text) || (!evidence && whoisFreeProse.MatchString(text)) {
 		return "unregistered", "Registry WHOIS reports the name as available"
 	}
 	notFound := whoisNotFound.MatchString(text)

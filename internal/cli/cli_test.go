@@ -66,6 +66,12 @@ func TestRawJSONStringAndOrderedOutput(t *testing.T) {
 	}
 }
 
+func TestRawExtractedEmptyStringPrintsEmptyLine(t *testing.T) {
+	out, err := execute(t, []string{"json", "--path", "a", "--raw"}, `{"a":""}`)
+	if err != nil || out != "\n" {
+		t.Fatalf("raw = %q, %v", out, err)
+	}
+}
 func TestLineInputDropsTrailingNewline(t *testing.T) {
 	out, err := execute(t, []string{"url", "--raw"}, "a b\n")
 	if err != nil || out != "a%20b\n" {

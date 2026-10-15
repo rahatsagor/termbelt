@@ -31,7 +31,8 @@ func Safe(s string) string {
 			b.WriteRune(r)
 		case r == '\t':
 			b.WriteString("    ")
-		case unicode.IsControl(r):
+		// Bidirectional controls can make untrusted text display in a misleading order.
+		case unicode.IsControl(r), unicode.Is(unicode.Bidi_Control, r):
 			fmt.Fprintf(&b, "\\u%04x", r)
 		default:
 			b.WriteRune(r)

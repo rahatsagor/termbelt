@@ -218,7 +218,7 @@ func NewCommand(version string) *cobra.Command {
 				return enc.Encode(result)
 			}
 			if raw {
-				if result.RawOutput != "" {
+				if result.RawOutput != "" || result.HasRaw {
 					_, err := fmt.Fprintln(out, result.RawOutput)
 					return err
 				}

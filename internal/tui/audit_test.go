@@ -76,3 +76,27 @@ func TestOversizedPasteCannotRunHashOfTruncatedInput(t *testing.T) {
 		t.Fatal("valid edit did not clear rejection")
 	}
 }
+
+func TestMultilinePasteRejectsWhatTheTextareaWouldTruncate(t *testing.T) {
+	m := testModel()
+	tool, _ := core.FindTool("hash")
+	m.openTool(tool)
+	m.Update(tea.PasteMsg{Content: strings.Repeat("x\n", maxTextareaLines)})
+	if !m.fields[0].rejectedInput || m.fields[0].value() != "" {
+		t.Fatal("paste beyond the textarea line limit was accepted")
+	}
+	m.fields[0].area.CharLimit = 10
+	m.Update(tea.PasteMsg{Content: "a\t\t\tb"})
+	if !m.fields[0].rejectedInput {
+		t.Fatal("tab expansion beyond the character limit was accepted")
+	}
+	m.fields[0].area.CharLimit = 1 << 20
+	m.Update(tea.PasteMsg{Content: strings.Repeat("line\n", 150)})
+	if m.fields[0].rejectedInput || strings.Count(m.fields[0].value(), "\n") != 150 {
+		t.Fatalf("150-line paste kept %d lines", strings.Count(m.fields[0].value(), "\n"))
+	}
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if strings.Count(m.fields[0].value(), "\n") != 151 {
+		t.Fatal("Enter stopped adding lines past the default textarea height")
+	}
+}

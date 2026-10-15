@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"image/color"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textarea"
@@ -241,6 +244,8 @@ func (m *Model) openTool(tool core.Tool) tea.Cmd {
 			field.area.Prompt = "│ "
 			field.area.ShowLineNumbers = false
 			field.area.CharLimit = 1 << 20
+			// The default MaxHeight of 99 also stops Enter from adding more lines.
+			field.area.MaxHeight = 0
 			field.area.SetHeight(5)
 			field.area.SetValue(value)
 		} else {
@@ -333,7 +338,7 @@ func (m *Model) start() tea.Cmd {
 }
 func (m *Model) setResultContent() {
 	if m.err != nil {
-		m.viewport.SetContent(lipgloss.NewStyle().Foreground(render.Amber).Bold(true).Render("Couldn’t complete this request") + "\n\n" + ansi.Hardwrap(render.Safe(m.err.Error()), max(20, m.width-8), true) + "\n\n" + lipgloss.NewStyle().Foreground(render.Muted).Render("Press e to edit, r to retry, or esc to return to the launcher."))
+		m.viewport.SetContent(lipgloss.NewStyle().Foreground(render.Amber).Bold(true).Render("Couldn’t complete this request") + "\n\n" + ansi.Wrap(render.Safe(m.err.Error()), max(20, m.width-8), "") + "\n\n" + lipgloss.NewStyle().Foreground(render.Muted).Render("Press e to edit, r to retry, or esc to return to the launcher."))
 		return
 	}
 	if m.jsonView {
@@ -342,10 +347,20 @@ func (m *Model) setResultContent() {
 		m.viewport.SetContent(render.Result(m.result, max(20, m.width-8), os.Getenv("NO_COLOR") == ""))
 	}
 }
+
+// maxTextareaLines matches the line limit the bubbles textarea silently enforces.
+const maxTextareaLines = 10000
+
 func copyText(text string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
+		// OSC 52 lets the terminal set the clipboard, including over SSH, where a
+		// system clipboard tool would copy on the remote machine instead.
+		osc52 := clipboardMsg{osc52: text}
+		if os.Getenv("SSH_TTY") != "" || os.Getenv("SSH_CONNECTION") != "" {
+			return osc52
+		}
 		var cmd *exec.Cmd
 		switch runtime.GOOS {
 		case "darwin":
@@ -356,19 +371,28 @@ func copyText(text string) tea.Cmd {
 			switch {
 			case os.Getenv("WAYLAND_DISPLAY") != "" && hasCommand("wl-copy"):
 				cmd = exec.CommandContext(ctx, "wl-copy")
-			case hasCommand("xclip"):
+			case os.Getenv("DISPLAY") != "" && hasCommand("xclip"):
 				cmd = exec.CommandContext(ctx, "xclip", "-selection", "clipboard")
-			case hasCommand("xsel"):
+			case os.Getenv("DISPLAY") != "" && hasCommand("xsel"):
 				cmd = exec.CommandContext(ctx, "xsel", "--clipboard", "--input")
-			case hasCommand("wl-copy"):
-				cmd = exec.CommandContext(ctx, "wl-copy")
 			default:
-				// OSC 52 lets terminals (including over SSH) set the clipboard.
-				return clipboardMsg{osc52: text}
+				return osc52
 			}
 		}
 		cmd.Stdin = strings.NewReader(text)
-		return clipboardMsg{err: cmd.Run()}
+		if runtime.GOOS == "windows" {
+			// clip.exe reads the console code page unless the input is UTF-16 with a BOM.
+			encoded := utf16.Encode([]rune("\ufeff" + text))
+			b := make([]byte, 2*len(encoded))
+			for i, unit := range encoded {
+				binary.LittleEndian.PutUint16(b[2*i:], unit)
+			}
+			cmd.Stdin = bytes.NewReader(b)
+		}
+		if err := cmd.Run(); err != nil {
+			return osc52
+		}
+		return clipboardMsg{}
 	}
 }
 func (m *Model) toastCmd(text string) tea.Cmd {
@@ -404,10 +428,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if text != "" && !m.fields[m.focus].isToggle() {
 			field := &m.fields[m.focus]
 			limit := field.input.CharLimit
+			length := utf8.RuneCountInString(field.value()) + utf8.RuneCountInString(text)
 			if field.multiline {
 				limit = field.area.CharLimit
+				// The textarea expands each tab to four spaces before applying its limit.
+				length += 3 * strings.Count(text, "\t")
+				lines := strings.Count(field.value(), "\n") + strings.Count(text, "\n") + strings.Count(text, "\r") - strings.Count(text, "\r\n") + 1
+				if lines > maxTextareaLines {
+					field.rejectedInput = true
+					return m, m.toastCmd(fmt.Sprintf("Input exceeds %d lines; use CLI stdin or hash --file", maxTextareaLines))
+				}
 			}
-			if limit > 0 && utf8.RuneCountInString(field.value())+utf8.RuneCountInString(text) > limit {
+			if limit > 0 && length > limit {
 				field.rejectedInput = true
 				return m, m.toastCmd(fmt.Sprintf("Input exceeds %d characters; use CLI stdin or hash --file", limit))
 			}
@@ -597,7 +629,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.result.Output != "" {
 						value = m.result.Output
 					}
-					if m.result.RawOutput != "" {
+					if m.result.RawOutput != "" || m.result.HasRaw {
 						value = m.result.RawOutput
 					}
 					if m.jsonView {
@@ -726,6 +758,8 @@ func (m *Model) homeView(width, height int) string {
 	if sideWidth == 0 {
 		return top + left
 	}
+	// The box width includes its border and padding.
+	inner := sideWidth - 4
 	preview := ""
 	if len(items) > 0 {
 		tool := items[selected]
@@ -733,16 +767,16 @@ func (m *Model) homeView(width, height int) string {
 		if tool.Local {
 			badge = tool.Category + "  /  RUNS LOCALLY"
 		}
-		preview = style(render.Teal).Render(badge) + "\n\n" + style(render.Text).Bold(true).Render(tool.Name) + "\n\n" + ansi.Hardwrap(style(render.Muted).Render(tool.Hint), sideWidth-4, true) + "\n\n" + style(render.Faint).Render("QUICK COMMAND") + "\n" + ansi.Hardwrap(style(render.Accent).Render(tool.Example), sideWidth-4, true) + "\n\n" + style(render.Muted).Render("enter  open workbench\nctrl+f toggle favorite") + "\n\n" + style(render.Faint).Render("One terminal. Fewer tabs.")
+		preview = style(render.Teal).Render(badge) + "\n\n" + style(render.Text).Bold(true).Render(tool.Name) + "\n\n" + ansi.Wrap(style(render.Muted).Render(tool.Hint), inner, "") + "\n\n" + style(render.Faint).Render("QUICK COMMAND") + "\n" + ansi.Wrap(style(render.Accent).Render(tool.Example), inner, "") + "\n\n" + style(render.Muted).Render("enter  open workbench\nctrl+f toggle favorite") + "\n\n" + style(render.Faint).Render("One terminal. Fewer tabs.")
 	}
-	right := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(render.Border).Padding(1, 1).Width(sideWidth - 4).Render(fit(preview, sideWidth-4, max(1, remaining-4)))
+	right := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(render.Border).Padding(1, 1).Width(sideWidth).Render(fit(preview, inner, max(1, remaining-4)))
 	return top + lipgloss.JoinHorizontal(lipgloss.Top, left, "    ", right)
 }
 func (m *Model) formView(width, height int) string {
 	var b strings.Builder
 	focusBottom := 0
 	b.WriteString(style(render.Text).Bold(true).Render(m.tool.Name) + "\n")
-	b.WriteString(ansi.Hardwrap(style(render.Muted).Render(m.tool.Hint), width-4, true) + "\n\n")
+	b.WriteString(ansi.Wrap(style(render.Muted).Render(m.tool.Hint), width-4, "") + "\n\n")
 	for i := range m.fields {
 		field := &m.fields[i]
 		label := field.spec.Label
@@ -796,7 +830,7 @@ func (m *Model) runningView(width, height int) string {
 	barWidth := min(48, width-8)
 	filled := int(float64(barWidth) * min(max(m.progress.Fraction, 0), 1))
 	bar := style(render.Teal).Render(strings.Repeat("━", filled)) + style(render.Border).Render(strings.Repeat("━", barWidth-filled))
-	content := style(render.Accent).Bold(true).Render(spinner+"  "+m.tool.Name) + "\n\n" + ansi.Hardwrap(style(render.Muted).Render(render.Safe(m.progress.Message)), width-8, true) + "\n\n" + bar + "\n\n"
+	content := style(render.Accent).Bold(true).Render(spinner+"  "+m.tool.Name) + "\n\n" + ansi.Wrap(style(render.Muted).Render(render.Safe(m.progress.Message)), width-8, "") + "\n\n" + bar + "\n\n"
 	for _, metric := range m.progress.Metrics {
 		content += style(render.Teal).Bold(true).Render(metric.Value+" "+metric.Unit) + "  " + style(render.Muted).Render(metric.Label) + "\n"
 	}

@@ -57,4 +57,5 @@ for native in sorted((root / "dist/native").glob("termbelt_*")):
                     info.mode = 0o755 if name == "termbelt" else 0o644
                     archive.addfile(info, io.BytesIO(contents))
     checksums.append(f"{hashlib.sha256(destination.read_bytes()).hexdigest()}  {destination.name}")
-(output / "SHA256SUMS").write_text("\n".join(checksums) + "\n", encoding="utf-8", newline="\n")
+with (output / "SHA256SUMS").open("w", encoding="utf-8", newline="\n") as sums:
+    sums.write("\n".join(checksums) + "\n")

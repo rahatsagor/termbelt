@@ -58,8 +58,10 @@ func parseHTTPURL(input string) (*url.URL, error) {
 	if u.Hostname() == "" || u.User != nil {
 		return nil, fmt.Errorf("URL must have a host and no embedded credentials")
 	}
-	host, err := idna.Lookup.ToASCII(u.Hostname())
-	if err != nil {
+	var host string
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil {
+		host = ip.String()
+	} else if host, err = idna.Lookup.ToASCII(u.Hostname()); err != nil {
 		return nil, fmt.Errorf("invalid hostname: %w", err)
 	}
 	if strings.ContainsAny(host, " \t\r\n") {
@@ -487,6 +489,9 @@ func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([
 	}
 	return records, nil
 }
+
+var asciiDNSName = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?$`)
+
 func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 	var host string
 	var err error
@@ -494,6 +499,9 @@ func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 	if ip, parseErr := netip.ParseAddr(strings.Trim(strings.TrimSpace(r.Input), "[]")); parseErr == nil {
 		host, err = dns.ReverseAddr(ip.String())
 		reverse = true
+	} else if name := strings.TrimSpace(r.Input); strings.Contains(name, "_") && asciiDNSName.MatchString(name) {
+		// IDNA's hostname rules reject "_", but SRV, DMARC and DKIM owner names require it.
+		host = strings.ToLower(name)
 	} else {
 		host, err = hostname(r.Input)
 	}

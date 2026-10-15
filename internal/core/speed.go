@@ -450,7 +450,7 @@ func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error
 	} else if provider == "fast" {
 		notes = append(notes, "Fast.com mode measures Netflix download throughput. Use --provider cloudflare for both download and upload.")
 	}
-	if downloadSeconds < 2 {
+	if downloadSeconds < 2 && data.DownloadStopReason == "byte-limit" {
 		notes = append(notes, "The download reached its data limit in under two seconds; increase --max-mb for a more stable measurement.")
 	}
 	return Result{Title: "Internet speed", Summary: map[string]string{"fast": "Fast.com · Netflix CDN", "cloudflare": "Cloudflare edge network"}[provider], Metrics: metrics, Sections: []Section{{Title: "MEASUREMENT", Rows: []Row{row("Servers", strings.Join(data.Servers, ", ")), row("Downloaded", fmt.Sprintf("%.2f MiB", float64(downloaded)/(1<<20))), row("Download elapsed", fmt.Sprintf("%.2f s", downloadSeconds)), row("Download stopped by", data.DownloadStopReason), row("Uploaded", fmt.Sprintf("%.2f MiB", float64(data.UploadedBytes)/(1<<20))), row("Upload elapsed", fmt.Sprintf("%.2f s", data.UploadSeconds)), row("Upload stopped by", nonempty(data.UploadStopReason, "not measured"))}}}, Notes: notes, Data: data}, nil

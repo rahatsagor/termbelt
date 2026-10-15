@@ -124,7 +124,9 @@ type Result struct {
 	Table    *Table    `json:"table,omitempty"`
 	Output   string    `json:"output,omitempty"`
 	// RawOutput replaces Output for --raw when the plain form differs, such as an unquoted JSON string.
-	RawOutput  string   `json:"-"`
+	RawOutput string `json:"-"`
+	// HasRaw marks an intentionally empty RawOutput, such as an extracted "" string.
+	HasRaw     bool     `json:"-"`
 	Notes      []string `json:"notes,omitempty"`
 	Data       any      `json:"data,omitempty"`
 	DurationMS int64    `json:"duration_ms"`

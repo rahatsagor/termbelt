@@ -14,6 +14,11 @@ func TestRemoteContentCannotInjectTerminalCommands(t *testing.T) {
 		t.Fatalf("unsafe terminal controls: %q", out)
 	}
 }
+func TestBidirectionalControlsAreEscaped(t *testing.T) {
+	if got := Safe("admin\u202egnp.exe"); strings.ContainsRune(got, '\u202e') || !strings.Contains(got, `\u202e`) {
+		t.Fatalf("Safe = %q", got)
+	}
+}
 func TestTablesWrapWithoutLosingLongValues(t *testing.T) {
 	value := strings.Repeat("abcdefghij", 25)
 	out := Table(core.Table{Headers: []string{"DOMAIN", "STATUS", "DETAIL"}, Rows: [][]string{{"fixture.test", "unknown", value}}}, 60, false)

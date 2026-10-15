@@ -23,6 +23,8 @@ func TestSplitHostPortAcceptsURLsIPv6AndInternationalNames(t *testing.T) {
 		{"[2001:db8::1]:8443", "2001:db8::1", "8443"},
 		{"2001:db8::1", "2001:db8::1", "443"},
 		{"192.0.2.1:25", "192.0.2.1", "25"},
+		{"https://[2001:db8::1]:8443/health", "2001:db8::1", "8443"},
+		{"http://[::1]/", "::1", "80"},
 	} {
 		host, port, err := splitHostPort(tc.input, "443")
 		if err != nil || host != tc.host || port != tc.port {
@@ -84,6 +86,44 @@ func TestJWTReportsLifecycleAndUnsignedTokens(t *testing.T) {
 	if result.Data.(map[string]any)["status"] != "not yet valid" || !strings.Contains(strings.Join(result.Notes, " "), "unsigned") {
 		t.Fatalf("jwt = %#v %v", result.Data, result.Notes)
 	}
+	for claims, want := range map[string]string{
+		`{"nbf":` + strconv.FormatInt(future, 10) + `}`: "not yet valid",
+		`{"exp":"tomorrow"}`:                            "invalid expiry",
+		`{"iat":1}`:                                     "no expiry",
+		`{"exp":1}`:                                     "expired",
+	} {
+		result, err := RunLocal(localRequest("jwt", segment(`{"alg":"HS256"}`)+"."+segment(claims)+".sig", nil))
+		if err != nil || result.Data.(map[string]any)["status"] != want {
+			t.Errorf("%s status = %v, %v; want %s", claims, result.Data, err, want)
+		}
+	}
+}
+
+func TestDNSAcceptsServiceNamesWithUnderscores(t *testing.T) {
+	for _, name := range []string{"_dmarc.example.com", "_sip._tcp.example.com", "selector._domainkey.example.com."} {
+		if !strings.Contains(name, "_") || !asciiDNSName.MatchString(name) {
+			t.Errorf("rejected %s", name)
+		}
+	}
+	for _, name := range []string{"_bad name.example.com", "_x..example.com", "_x.exa$mple.com"} {
+		if asciiDNSName.MatchString(name) {
+			t.Errorf("accepted %q", name)
+		}
+	}
+}
+
+func TestSaveFavoritesRepairsDamagedSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("TERMBELT_CONFIG", path)
+	if err := os.WriteFile(path, []byte(`{"timeout_seconds":0}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveFavorites([]string{"json"}); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := LoadConfig(); err != nil || strings.Join(c.Favorites, ",") != "json" || c.TimeoutSeconds != 20 {
+		t.Fatalf("config = %#v, %v", c, err)
+	}
 }
 
 func TestConfigSetAndResetRepairInvalidSettings(t *testing.T) {
@@ -138,10 +178,14 @@ func TestListenerParsers(t *testing.T) {
 	if len(listeners) != 1 || listeners[0].Address != "127.0.0.1" || listeners[0].Port != 8080 {
 		t.Fatalf("proc = %#v", listeners)
 	}
-	lsof := "p95\ncnode\nf20\nn*:3000\nn127.0.0.1:9229\np7\ncpostgres\nf5\nn[::1]:5432\n"
+	lsof := "p95\ncnode\nf20\ntIPv4\nn*:3000\nf21\ntIPv6\nn*:3000\ntIPv4\nn127.0.0.1:9229\np7\ncpostgres\nf5\ntIPv6\nn[::1]:5432\n"
 	parsed := parseLsof(lsof)
-	if len(parsed) != 3 || parsed[0].Address != "0.0.0.0" || parsed[2].Address != "::1" || parsed[2].Process != "postgres" || parsed[2].PID != 7 {
+	if len(parsed) != 4 || parsed[0].Address != "0.0.0.0" || parsed[1].Address != "::" || parsed[3].Address != "::1" || parsed[3].Process != "postgres" || parsed[3].PID != 7 {
 		t.Fatalf("lsof = %#v", parsed)
+	}
+	scoped := parseSS("LISTEN 0 128 [fe80::1]%eth0:22 [::]:* users:((\"sshd\",pid=9,fd=3))\n")
+	if len(scoped) != 1 || scoped[0].Address != "fe80::1" || scoped[0].Port != 22 {
+		t.Fatalf("scoped ss = %#v", scoped)
 	}
 }
 

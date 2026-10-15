@@ -22,6 +22,8 @@ func TestClassifyWhoisResponses(t *testing.T) {
 		{"error coded not registered", "free-name.rs", "%ERROR:103: Domain is not registered\n", "unregistered"},
 		{"rate limited", "nic.aw", "Error: ratelimit exceeded\n", "unknown"},
 		{"empty", "nic.example", "\r\n", "unknown"},
+		{"registered record with free-of-charge disclaimer", "nic.sh", "Domain Name: nic.sh\nRegistrar: Example Registrar\nThis service is free of charge for lookups.\n", "registered"},
+		{"prose available without record", "free-name.xy", "The domain free-name.xy is available for registration.\n", "unregistered"},
 		{"banner without record", "nic.kz", "Whois Server for the .kz top level domain.\nThis server is maintained by KazNIC.\n", "unknown"},
 	}
 	for _, c := range cases {
