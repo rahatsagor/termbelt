@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.0
+
+- Install with Homebrew on macOS and Linux: `brew install rahatsagor/tap/termbelt`, with bash, zsh and fish completions. Releases update the tap formula automatically.
+- `bunx termbelt` and `npx termbelt` work on any Node.js 18 or later: the launcher falls back to a child process with forwarded signals when `process.execve` is unavailable. `--bun` is no longer needed.
+- New logo: a terminal window whose title bar and block cursor form a T. The workbench header draws it too.
+- `dns` accepts underscore names such as `_dmarc.example.com` and `_sip._tcp.example.com`, so SRV, DMARC and DKIM lookups work.
+- `http`, `site`, `tls` and `ping` accept bracketed IPv6 URLs such as `https://[2001:db8::1]:8443/`.
+- `ports` shows IPv6 wildcard listeners as `::` on macOS and no longer mangles scoped IPv6 addresses from `ss` on Linux.
+- Workbench multiline editors no longer stop accepting Enter after 99 lines, and reject pastes the editor would otherwise truncate (over 10,000 lines, or over the limit after tab expansion).
+- Copy over SSH uses the terminal clipboard (OSC 52), falls back to it when a clipboard tool fails, and only uses `xclip` / `xsel` / `wl-copy` with a display. Windows copies non-ASCII text correctly.
+- Saving a favorite repairs a damaged settings file instead of failing.
+- `json --raw` prints an empty line for an extracted empty string instead of `""`.
+- JWT status reports "not yet valid" for future `nbf` tokens without `exp`, and "invalid expiry" for a non-numeric `exp`.
+- WHOIS disclaimers such as "this service is free of charge" no longer mark a registered domain as unregistered.
+- `domains --all` interleaves WHOIS-only TLDs by WHOIS server, and the speed-test data-limit hint appears only when the limit was actually reached.
+- Bidirectional control characters in network responses are escaped before rendering.
+- The workbench preview wraps at word boundaries and uses the full width; form hints, progress and errors wrap at words too.
+- Release archives build with Python 3.9.
+- Updated Bubble Tea to 2.1.0, golang.org/x/net to 0.61.0, x/sys to 0.49.0, x/term to 0.47.0 and charmbracelet/x/ansi to 0.11.9.
+
 ## 1.1.1
 
 - Build with Go 1.27.2 and golang.org/x/net 0.60.0 for GO-2026-6617 (HTTP/2 HPACK encoder race).
