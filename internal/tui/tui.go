@@ -686,12 +686,18 @@ func fit(s string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 func (m *Model) header(width int) string {
-	brand := style(render.Accent).Bold(true).Render("◈  T E R M B E L T")
+	brand := render.Mark(true) + "  " + style(render.Accent).Bold(true).Render("T E R M B E L T")
 	subtitle := "YOUR DAILY WORKBENCH"
 	if m.screen != home {
 		subtitle = m.tool.Category + " / " + strings.ToUpper(m.tool.ID)
 	}
 	right := style(render.Muted).Render("v" + m.version + "  ·  " + fmt.Sprint(len(core.Tools)) + " tools")
+	if ansi.StringWidth(brand)+ansi.StringWidth(right) >= width {
+		brand = render.Mark(true) + " " + style(render.Accent).Bold(true).Render("TERMBELT")
+	}
+	if ansi.StringWidth(brand)+ansi.StringWidth(right) >= width {
+		right = style(render.Muted).Render("v" + m.version)
+	}
 	space := max(1, width-ansi.StringWidth(brand)-ansi.StringWidth(right))
 	return brand + strings.Repeat(" ", space) + right + "\n" + style(render.Faint).Render(subtitle) + "\n" + style(render.Border).Render(strings.Repeat("─", width))
 }

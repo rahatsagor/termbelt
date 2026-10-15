@@ -20,7 +20,18 @@ var (
 	Panel  = lipgloss.Color("#191C2B")
 	Border = lipgloss.Color("#363B53")
 	Amber  = lipgloss.Color("#F6C177")
+	Mint   = lipgloss.Color("#C9F394")
 )
+
+// Mark draws the Termbelt logo in two cells of height: a title bar over a block
+// cursor, forming a T. The middle cell's background paints the cursor stem.
+func Mark(color bool) string {
+	if !color {
+		return "▀█▀"
+	}
+	bar := lipgloss.NewStyle().Foreground(Accent)
+	return bar.Render("▀") + bar.Background(Mint).Render("▀") + bar.Render("▀")
+}
 
 // Terminal data is untrusted, even when it comes from a user's clipboard.
 func Safe(s string) string {
