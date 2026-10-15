@@ -79,24 +79,34 @@ async function main() {
   const packageRoot = join(temporary, "node_modules", "termbelt");
   assert.deepEqual(readdirSync(packageRoot).sort(), ["LICENSE", "README.md", "THIRD_PARTY_NOTICES", "npm", "package.json"]);
   assert.deepEqual(readdirSync(join(packageRoot, "npm")).sort(), ["platforms.cjs", "termbelt.cjs"]);
-  for (const runtime of [process.execPath, process.env.NODE_BINARY || "node"]) {
-    assert.equal(success(await run(runtime, [installed, "--version"], { env: environment })).trim(), `termbelt version ${metadata.version}`);
-    const json = JSON.parse(success(await run(runtime, [installed, "json", "--path", "id", "--json"], { env: environment, input: '{"id":9007199254740993}' })));
+  // Node.js before 22.15 has no process.execve; the launcher must fall back to a child process.
+  const withoutExecve = join(temporary, "without-execve.cjs");
+  writeFileSync(withoutExecve, "delete process.execve;\n");
+  const node = process.env.NODE_BINARY || "node";
+  const runtimes = [
+    { name: "bun", command: process.execPath, args: [] },
+    { name: "node", command: node, args: [] },
+    { name: "node-without-execve", command: node, args: ["--require", withoutExecve] },
+  ];
+  for (const runtime of runtimes) {
+    const launch = (args, options) => run(runtime.command, [...runtime.args, installed, ...args], { env: environment, ...options });
+    assert.equal(success(await launch(["--version"])).trim(), `termbelt version ${metadata.version}`);
+    const json = JSON.parse(success(await launch(["json", "--path", "id", "--json"], { input: '{"id":9007199254740993}' })));
     assert.equal(json.output, "9007199254740993");
-    assert.equal(success(await run(runtime, [installed, "base64", "space ; $ and ' quote", "--raw"], { env: environment })).trim(), Buffer.from("space ; $ and ' quote").toString("base64"));
-    const invalid = await run(runtime, [installed, "does-not-exist"], { env: environment });
+    assert.equal(success(await launch(["base64", "space ; $ and ' quote", "--raw"])).trim(), Buffer.from("space ; $ and ' quote").toString("base64"));
+    const invalid = await launch(["does-not-exist"]);
     assert.equal(invalid.code, 1);
     assert.match(invalid.stderr, /termbelt:/);
     if (process.platform !== "win32") {
-      const wrapper = join(temporary, runtime === process.execPath ? "bun-launcher" : "node-launcher");
+      const wrapper = join(temporary, `${runtime.name}-launcher`);
       const quote = value => "'" + value.replace(/'/g, "'\\''") + "'";
-      writeFileSync(wrapper, `#!/bin/sh\nexec ${quote(runtime)} ${quote(installed)} "$@"\n`);
+      writeFileSync(wrapper, `#!/bin/sh\nexec ${[runtime.command, ...runtime.args, installed].map(quote).join(" ")} "$@"\n`);
       chmodSync(wrapper, 0o755);
       success(await run(process.env.PYTHON || "python3", [join(root, "scripts", "edge_smoke.py"), "--binary", wrapper], { env: environment }));
       success(await run(process.env.PYTHON || "python3", [join(root, "scripts", "tui_smoke.py"), "--binary", wrapper, "--plain"], { env: environment }));
-      console.log(`PASS ${runtime}: exact stdin, cancellation, TUI interactions, resize and terminal restoration`);
+      console.log(`PASS ${runtime.name}: exact stdin, cancellation, TUI interactions, resize and terminal restoration`);
     } else {
-      console.log(`PASS ${runtime}: version, piped input, arguments and failure status`);
+      console.log(`PASS ${runtime.name}: version, piped input, arguments and failure status`);
     }
   }
   const nativeDirectory = join(temporary, "node_modules", "@rahatsagor", `termbelt-${platform.os}-${platform.cpu}`);
