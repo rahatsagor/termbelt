@@ -6,8 +6,8 @@ writes each frame as an SVG with real colors. Unix only; needs `pip install pyte
 
     make build && python3 scripts/screenshots.py --binary build/termbelt
 
-With --landing PATH it also runs every tool with a sample input, at a wide and a
-narrow width, and writes the real form and result frames as JSON for the
+With --landing PATH it also runs every tool with a sample input, at 108, 76 and 58
+columns, and writes the real form and result frames as JSON for the
 website's interactive preview. Network tools make real requests.
 """
 import argparse
@@ -223,7 +223,7 @@ def landing(binary, output, config):
     tools = tools_from_source()
     version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.split()[-1]
     styles, layouts = {}, {}
-    for name, cols in (("wide", 108), ("narrow", 58)):
+    for name, cols in (("wide", 108), ("medium", 76), ("narrow", 58)):
         frames = {}
         for index, tool in enumerate(tools):
             session = Session(binary, cols, 64, config)
