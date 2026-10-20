@@ -139,6 +139,10 @@ func Run(engine *core.Engine, version string, plain bool) error {
 	if plain || os.Getenv("NO_COLOR") != "" {
 		options = append(options, tea.WithColorProfile(colorprofile.Ascii))
 	}
+	if input, err := openTerminalInput(); err == nil {
+		defer input.Close()
+		options = append(options, tea.WithInput(input))
+	}
 	_, err := tea.NewProgram(m, options...).Run()
 	return err
 }
