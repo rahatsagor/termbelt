@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1
+
+- The workbench no longer stops responding to every key, including Ctrl+C, after the Mac sleeps. It reads keys from `/dev/tty` instead of polling stdin with kqueue, which can stop reporting a terminal as readable. If terminal input ever closes, the workbench exits and restores the terminal instead of hanging.
+- The hash, Base64 and regex editors reject pasted tabs and carriage returns, which the editor would turn into spaces and newlines and so change the result. Use CLI stdin for exact input.
+- The workbench JSON view escapes bidirectional control characters, like the other views.
+- An error result no longer offers `c copy` and `j JSON`, which did nothing there.
+- `time` reads a piped timestamp; it used to ignore stdin and print the current time.
+- Commands that need input fail with a hint when run with no argument and nothing piped, instead of hashing or encoding an empty string.
+- A command stopped with Ctrl+C or SIGTERM exits with status 130 and prints `canceled`.
+- The regex summary reads "1,000+ matches" when results are capped.
+- `dns` tries the next system resolver when the first one does not respond, such as a VPN resolver left behind after the network changes.
+- Removing a favorite no longer rewrites other copies of the favorites list, and the RDAP metadata cache is flushed to disk before it replaces the old file.
 ## 1.2.0
 
 - Install with Homebrew on macOS and Linux: `brew install rahatsagor/tap/termbelt`, with bash, zsh and fish completions. Releases update the tap formula automatically.

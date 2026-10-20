@@ -10,7 +10,7 @@ import (
 	"github.com/rahatsagor/termbelt/internal/render"
 )
 
-var version = "1.2.0"
+var version = "1.2.1"
 
 func main() {
 	if err := cli.Execute(version); err != nil {
