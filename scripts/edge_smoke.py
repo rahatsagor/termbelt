@@ -46,7 +46,9 @@ with tempfile.TemporaryDirectory(prefix="termbelt-edge-") as temporary:
             process = subprocess.Popen([binary, command, "--raw"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
             try:
                 # Keep stdin open and empty; cancellation must interrupt the blocked read.
-                time.sleep(0.15)
+                # A launcher wrapper must first start the executable and forward signals,
+                # which can take several hundred milliseconds on a busy CI runner.
+                time.sleep(1.0)
                 process.send_signal(signal.SIGINT)
                 process.wait(timeout=3)
                 assert process.returncode != 0, f"{command} cancellation reported success"
