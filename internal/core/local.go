@@ -682,7 +682,11 @@ func regexTool(r Request) (Result, error) {
 	if truncated {
 		notes = append(notes, "Output capped at 1,000 matches.")
 	}
-	return Result{Title: "Regex playground", Summary: fmt.Sprintf("%d matches", len(matches)), Table: table, Notes: notes, Data: data}, nil
+	summary := fmt.Sprintf("%d matches", len(matches))
+	if truncated {
+		summary = "1,000+ matches"
+	}
+	return Result{Title: "Regex playground", Summary: summary, Table: table, Notes: notes, Data: data}, nil
 }
 func cidrTool(r Request) (Result, error) {
 	input := strings.TrimSpace(r.Input)

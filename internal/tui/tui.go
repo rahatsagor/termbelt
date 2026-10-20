@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -346,7 +347,7 @@ func (m *Model) setResultContent() {
 		return
 	}
 	if m.jsonView {
-		m.viewport.SetContent(ansi.Hardwrap(core.PrettyJSON(m.result), max(20, m.width-8), true))
+		m.viewport.SetContent(ansi.Hardwrap(render.Safe(core.PrettyJSON(m.result)), max(20, m.width-8), true))
 	} else {
 		m.viewport.SetContent(render.Result(m.result, max(20, m.width-8), os.Getenv("NO_COLOR") == ""))
 	}
@@ -354,6 +355,20 @@ func (m *Model) setResultContent() {
 
 // maxTextareaLines matches the line limit the bubbles textarea silently enforces.
 const maxTextareaLines = 10000
+
+// exactInputTools give a different answer when the textarea rewrites input.
+var exactInputTools = map[string]bool{"hash": true, "base64": true, "regex": true}
+
+// textareaAlters reports whether the textarea would change text on entry: it
+// expands tabs, turns carriage returns into newlines and drops other controls.
+func textareaAlters(text string) bool {
+	for _, r := range text {
+		if r != '\n' && (r == '\t' || r == '\r' || unicode.IsControl(r) || r == utf8.RuneError) {
+			return true
+		}
+	}
+	return false
+}
 
 func copyText(text string) tea.Cmd {
 	return func() tea.Msg {
@@ -442,6 +457,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					field.rejectedInput = true
 					return m, m.toastCmd(fmt.Sprintf("Input exceeds %d lines; use CLI stdin or hash --file", maxTextareaLines))
 				}
+			}
+			if field.multiline && exactInputTools[m.tool.ID] && textareaAlters(text) {
+				field.rejectedInput = true
+				return m, m.toastCmd("This field turns tabs and carriage returns into spaces and newlines; pipe exact input on CLI stdin")
 			}
 			if limit > 0 && length > limit {
 				field.rejectedInput = true
@@ -623,6 +642,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				return m, m.start()
 			case "j":
+				if m.err != nil {
+					return m, nil
+				}
 				m.jsonView = !m.jsonView
 				m.setResultContent()
 				m.viewport.GotoTop()
@@ -874,6 +896,9 @@ func (m *Model) View() tea.View {
 	case resultScreen:
 		content = m.viewport.View()
 		footer = fmt.Sprintf("↑↓ scroll   c copy   j JSON   e edit   r retry   esc home   %.0f%%", m.viewport.ScrollPercent()*100)
+		if m.err != nil {
+			footer = "e edit   r retry   esc home"
+		}
 	}
 	if m.toast != "" {
 		footer = m.toast

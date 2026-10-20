@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -443,10 +444,74 @@ func dnsResolver(custom string) (string, error) {
 		}
 		return net.JoinHostPort(host, "53"), nil
 	}
-	if servers := systemResolvers(); len(servers) > 0 {
+	if servers := systemResolverList(); len(servers) > 0 {
 		return servers[0], nil
 	}
 	return "", fmt.Errorf("could not read the system DNS resolver; specify --resolver 1.1.1.1")
+}
+
+// systemResolverList is replaced in tests.
+var systemResolverList = systemResolvers
+
+// maxSystemResolvers bounds how long a lookup waits on unresponsive servers,
+// such as a VPN resolver that is gone after the network changes.
+const maxSystemResolvers = 3
+
+// dnsResolvers returns the custom resolver, or the system resolvers to try in order.
+func dnsResolvers(custom string) ([]string, error) {
+	if strings.TrimSpace(custom) != "" {
+		resolver, err := dnsResolver(custom)
+		if err != nil {
+			return nil, err
+		}
+		return []string{resolver}, nil
+	}
+	servers := systemResolverList()
+	if len(servers) == 0 {
+		return nil, fmt.Errorf("could not read the system DNS resolver; specify --resolver 1.1.1.1")
+	}
+	return servers[:min(len(servers), maxSystemResolvers)], nil
+}
+
+// rcodeError is a reply from the resolver, as opposed to no reply at all.
+type rcodeError int
+
+func (e rcodeError) Error() string { return "DNS " + dns.RcodeToString[int(e)] }
+
+// lookupRecords queries every type in parallel. answered reports whether the
+// resolver replied to at least one query, even with an error code.
+func lookupRecords(ctx context.Context, host string, types []uint16, resolver string) (records []DNSRecord, notes []string, answered bool) {
+	type answer struct {
+		records []DNSRecord
+		err     error
+		kind    uint16
+	}
+	ch := make(chan answer, len(types))
+	for _, t := range types {
+		go func(t uint16) { records, err := queryDNS(ctx, host, t, resolver); ch <- answer{records, err, t} }(t)
+	}
+	records = []DNSRecord{}
+	notes = []string{}
+	seen := map[DNSRecord]bool{}
+	for range types {
+		a := <-ch
+		var rcode rcodeError
+		if a.err == nil || errors.As(a.err, &rcode) {
+			answered = true
+		}
+		if a.err != nil {
+			notes = append(notes, dns.TypeToString[a.kind]+": "+a.err.Error())
+			continue
+		}
+		for _, record := range a.records {
+			if !seen[record] {
+				records = append(records, record)
+				seen[record] = true
+			}
+		}
+	}
+	sort.Strings(notes)
+	return records, notes, answered
 }
 
 func resolvConfServers() []string {
@@ -479,7 +544,7 @@ func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([
 		}
 	}
 	if reply.Rcode != dns.RcodeSuccess {
-		return nil, fmt.Errorf("DNS %s", dns.RcodeToString[reply.Rcode])
+		return nil, rcodeError(reply.Rcode)
 	}
 	records := []DNSRecord{}
 	for _, rr := range reply.Answer {
@@ -509,7 +574,7 @@ func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 		return Result{}, err
 	}
 	host = strings.TrimSuffix(host, ".")
-	resolver, err := dnsResolver(r.Opt("resolver", ""))
+	resolvers, err := dnsResolvers(r.Opt("resolver", ""))
 	if err != nil {
 		return Result{}, err
 	}
@@ -525,34 +590,23 @@ func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 		}
 		types = []uint16{t}
 	}
-	type answer struct {
-		records []DNSRecord
-		err     error
-		kind    uint16
-	}
-	ch := make(chan answer, len(types))
-	for _, t := range types {
-		go func(t uint16) { records, err := queryDNS(ctx, host, t, resolver); ch <- answer{records, err, t} }(t)
-	}
-	records := []DNSRecord{}
-	notes := []string{}
-	seen := map[DNSRecord]bool{}
-	for range types {
-		a := <-ch
-		if a.err != nil {
-			notes = append(notes, dns.TypeToString[a.kind]+": "+a.err.Error())
-		} else {
-			for _, record := range a.records {
-				if !seen[record] {
-					records = append(records, record)
-					seen[record] = true
-				}
-			}
+	var records []DNSRecord
+	var notes, silent []string
+	resolver := ""
+	for i, candidate := range resolvers {
+		resolver = candidate
+		var answered bool
+		records, notes, answered = lookupRecords(ctx, host, types, candidate)
+		if answered || ctx.Err() != nil || i == len(resolvers)-1 {
+			break
 		}
+		silent = append(silent, candidate)
 	}
-	sort.Strings(notes)
 	if len(notes) == len(types) {
 		return Result{}, fmt.Errorf("DNS lookup failed: %s", strings.Join(notes, "; "))
+	}
+	if len(silent) > 0 {
+		notes = append(notes, "System resolver "+strings.Join(silent, ", ")+" did not respond; used the next one.")
 	}
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].Type == records[j].Type {

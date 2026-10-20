@@ -33,7 +33,7 @@ func Execute(version string) error {
 // echo and most editors append.
 var stdinModes = map[string]string{
 	"json": "bytes", "base64": "bytes", "jwt": "bytes", "hash": "bytes", "regex": "bytes",
-	"url": "line", "cidr": "line", "cron": "line",
+	"url": "line", "cidr": "line", "cron": "line", "time": "line",
 	"domains": "line", "whois": "line", "site": "line", "dns": "line", "tls": "line", "http": "line", "ping": "line",
 }
 
@@ -166,6 +166,11 @@ func NewCommand(version string) *cobra.Command {
 			hasArg := len(args) > 0
 			if tool.ID == "regex" {
 				hasArg = len(args) > 1
+			}
+			// An empty input would otherwise produce a plausible result, such as
+			// the hash of nothing. Only time treats empty input as "now".
+			if mode != "" && !hasArg && req.Options["file"] == "" && tool.ID != "time" && stdinIsTerminal(cmd) {
+				return fmt.Errorf("pass the input as an argument or pipe it on stdin")
 			}
 			if mode != "" && !hasArg && req.Options["file"] == "" && !stdinIsTerminal(cmd) {
 				input, closeInput := interruptibleInput(ctx, cmd.InOrStdin())

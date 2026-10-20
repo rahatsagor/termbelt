@@ -69,7 +69,10 @@ func cacheMetadata(name string, b []byte) {
 	}
 	defer os.Remove(f.Name())
 	if _, err = f.Write(b); err == nil {
-		err = f.Close()
+		err = f.Sync()
+		if closeErr := f.Close(); err == nil {
+			err = closeErr
+		}
 		if err == nil {
 			_ = os.Rename(f.Name(), filepath.Join(base, name))
 		}
@@ -475,9 +478,6 @@ func (r *Registry) lookupRDAP(ctx context.Context, domain string) RDAPLookup {
 	}
 	if resp.StatusCode != 200 {
 		result.Reason = fmt.Sprintf("Registry returned HTTP %d", resp.StatusCode)
-		if resp.StatusCode == 429 {
-			result.Reason += " (rate limited)"
-		}
 		return result
 	}
 	class, _ := data["objectClassName"].(string)

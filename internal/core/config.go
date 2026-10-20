@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -190,7 +191,7 @@ func (c Config) IsFavorite(id string) bool {
 func (c *Config) ToggleFavorite(id string) {
 	for i, v := range c.Favorites {
 		if v == id {
-			c.Favorites = append(c.Favorites[:i], c.Favorites[i+1:]...)
+			c.Favorites = slices.Delete(slices.Clone(c.Favorites), i, i+1)
 			return
 		}
 	}
