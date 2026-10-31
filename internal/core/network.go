@@ -47,6 +47,10 @@ func parseHTTPURL(input string) (*url.URL, error) {
 		return nil, fmt.Errorf("enter a hostname or URL")
 	}
 	if !strings.Contains(input, "://") {
+		// A bare IPv6 address would otherwise parse as a host with a port.
+		if ip, err := netip.ParseAddr(input); err == nil && ip.Is6() {
+			input = "[" + strings.ReplaceAll(ip.String(), "%", "%25") + "]"
+		}
 		input = "https://" + input
 	}
 	u, err := url.Parse(input)
@@ -741,6 +745,10 @@ func (e *Engine) Ping(ctx context.Context, r Request, emit Emit) (Result, error)
 	if err != nil {
 		return Result{}, err
 	}
+	wait, err := r.Int("wait", 3, 1, 30)
+	if err != nil {
+		return Result{}, err
+	}
 	samples := []float64{}
 	table := &Table{Headers: []string{"#", "STATUS", "LATENCY"}}
 	failed := 0
@@ -749,7 +757,7 @@ func (e *Engine) Ping(ctx context.Context, r Request, emit Emit) (Result, error)
 			return Result{}, ctx.Err()
 		}
 		start := time.Now()
-		conn, err := (&net.Dialer{Timeout: 3 * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		conn, err := (&net.Dialer{Timeout: time.Duration(wait) * time.Second}).DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 		ms := float64(time.Since(start).Microseconds()) / 1000
 		status := "connected"
 		latency := fmt.Sprintf("%.2f ms", ms)

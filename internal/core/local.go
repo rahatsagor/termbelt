@@ -272,7 +272,12 @@ func urlTool(r Request) (Result, error) {
 	}
 }
 func jwtTool(r Request) (Result, error) {
-	parts := strings.Split(strings.TrimSpace(r.Input), ".")
+	token := strings.TrimSpace(r.Input)
+	// Tokens are often copied straight from an Authorization header.
+	if len(token) > 7 && strings.EqualFold(token[:7], "bearer ") {
+		token = strings.TrimSpace(token[7:])
+	}
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return Result{}, fmt.Errorf("expected a JWT with three dot-separated segments")
 	}
@@ -579,7 +584,7 @@ func parseTimeUnit(input string, loc *time.Location, unit string) (time.Time, er
 		}
 		return t, nil
 	}
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006-01-02"} {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05.999999999", "2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02"} {
 		t, err := time.ParseInLocation(layout, input, loc)
 		if err == nil {
 			if t.Year() < 1 || t.Year() > 9999 {
@@ -588,7 +593,7 @@ func parseTimeUnit(input string, loc *time.Location, unit string) (time.Time, er
 			return t, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("expected a Unix timestamp, RFC3339, or YYYY-MM-DD HH:MM:SS")
+	return time.Time{}, fmt.Errorf("expected a Unix timestamp, RFC3339, or YYYY-MM-DD HH:MM:SS with a space or T")
 }
 func timeTool(r Request) (Result, error) {
 	loc, err := loadZone(r.Opt("zone", "Local"))
@@ -664,6 +669,8 @@ func regexTool(r Request) (Result, error) {
 	data := []map[string]any{}
 	for i, m := range matches {
 		groups := map[string]string{}
+		captures := []map[string]any{}
+		lines := []string{}
 		for j := 1; j < len(m)/2; j++ {
 			if m[j*2] < 0 {
 				continue
@@ -672,11 +679,22 @@ func regexTool(r Request) (Result, error) {
 			if name == "" {
 				name = strconv.Itoa(j)
 			}
-			groups[name] = r.Input[m[j*2]:m[j*2+1]]
+			value := r.Input[m[j*2]:m[j*2+1]]
+			groups[name] = value
+			captures = append(captures, map[string]any{"index": j, "name": re.SubexpNames()[j], "value": value})
+			key, _ := json.Marshal(name)
+			quoted, _ := json.Marshal(value)
+			lines = append(lines, "  "+string(key)+": "+string(quoted))
+		}
+		// The groups map is encoded with sorted keys (1, 10, 2…); show and
+		// list captures in pattern order instead.
+		shown := "{}"
+		if len(lines) > 0 {
+			shown = "{\n" + strings.Join(lines, ",\n") + "\n}"
 		}
 		value := r.Input[m[0]:m[1]]
-		table.Rows = append(table.Rows, []string{strconv.Itoa(i + 1), value, fmt.Sprintf("%d:%d", m[0], m[1]), PrettyJSON(groups)})
-		data = append(data, map[string]any{"match": value, "start": m[0], "end": m[1], "groups": groups})
+		table.Rows = append(table.Rows, []string{strconv.Itoa(i + 1), value, fmt.Sprintf("%d:%d", m[0], m[1]), shown})
+		data = append(data, map[string]any{"match": value, "start": m[0], "end": m[1], "groups": groups, "captures": captures})
 	}
 	notes := []string{"Go / RE2 syntax; backreferences and lookaround are not supported."}
 	if truncated {

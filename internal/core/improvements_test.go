@@ -211,3 +211,61 @@ func TestLatencySummaryUsesMedianAndJitter(t *testing.T) {
 		t.Fatalf("summary = %#v", s)
 	}
 }
+
+func TestParseHTTPURLAcceptsBareIPv6(t *testing.T) {
+	for input, want := range map[string]string{"2001:db8::1": "https://[2001:db8::1]", "fe80::1%en0": "https://[fe80::1%25en0]", "[2001:db8::1]:8443": "https://[2001:db8::1]:8443"} {
+		u, err := parseHTTPURL(input)
+		if err != nil || u.String() != want {
+			t.Errorf("%s = %v, %v; want %s", input, u, err, want)
+		}
+	}
+	if host, err := hostname("2001:db8::1"); err != nil || host != "2001:db8::1" {
+		t.Errorf("hostname = %q, %v", host, err)
+	}
+}
+
+func TestTimeAcceptsISOLocalDates(t *testing.T) {
+	utc, _ := loadZone("UTC")
+	for _, input := range []string{"2026-01-01T10:00:00", "2026-01-01 10:00:00", "2026-01-01T10:00", "2026-01-01T10:00:00.5"} {
+		got, err := parseTime(input, utc)
+		if err != nil || got.Unix() != 1767261600 {
+			t.Errorf("%s = %v, %v", input, got, err)
+		}
+	}
+}
+
+func TestJWTAcceptsBearerPrefix(t *testing.T) {
+	segment := func(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
+	token := segment(`{"alg":"HS256"}`) + "." + segment(`{"sub":"1"}`) + ".sig"
+	for _, input := range []string{"Bearer " + token, "bearer   " + token + "\n"} {
+		if _, err := RunLocal(localRequest("jwt", input, nil)); err != nil {
+			t.Errorf("%q: %v", input, err)
+		}
+	}
+}
+
+func TestRegexCapturesKeepPatternOrder(t *testing.T) {
+	result, err := RunLocal(Request{Tool: "regex", Input: "abcdefghijk", Options: map[string]string{"pattern": "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(?P<last>k)"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := result.Table.Rows[0][3]
+	if strings.Index(shown, `"2"`) > strings.Index(shown, `"10"`) || !strings.HasSuffix(shown, "\"last\": \"k\"\n}") {
+		t.Fatalf("groups shown out of order: %s", shown)
+	}
+	captures := result.Data.([]map[string]any)[0]["captures"].([]map[string]any)
+	if len(captures) != 11 || captures[1]["value"] != "b" || captures[10]["name"] != "last" {
+		t.Fatalf("captures = %v", captures)
+	}
+}
+
+func TestPingWaitIsValidated(t *testing.T) {
+	e := NewEngine(Config{TimeoutSeconds: 20})
+	if _, err := e.Ping(t.Context(), Request{Input: "127.0.0.1:1", Options: map[string]string{"wait": "0"}}, nil); err == nil {
+		t.Fatal("accepted --wait 0")
+	}
+	result, err := e.Ping(t.Context(), Request{Input: "127.0.0.1:1", Options: map[string]string{"wait": "1", "count": "1"}}, nil)
+	if err != nil || result.Table.Rows[0][1] != "failed" {
+		t.Fatalf("ping = %#v, %v", result.Table, err)
+	}
+}
