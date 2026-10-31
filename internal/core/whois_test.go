@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestClassifyWhoisResponses(t *testing.T) {
@@ -25,6 +26,13 @@ func TestClassifyWhoisResponses(t *testing.T) {
 		{"registered record with free-of-charge disclaimer", "nic.sh", "Domain Name: nic.sh\nRegistrar: Example Registrar\nThis service is free of charge for lookups.\n", "registered"},
 		{"prose available without record", "free-name.xy", "The domain free-name.xy is available for registration.\n", "unregistered"},
 		{"banner without record", "nic.kz", "Whois Server for the .kz top level domain.\nThis server is maintained by KazNIC.\n", "unknown"},
+		{"registered record with unavailable-contact disclaimer", "nic.ac", "Domain Name: nic.ac\nCreation Date: 2003-09-15T11:13:53Z\nRegistrar: Example Registrar\nRegistrant contact information is not available in this view.\n", "registered"},
+		{"unavailable without record", "taken.xy", "The name taken.xy is not available.\n", "unknown"},
+		{"zacr available", "free-name.co.za", "Available\n\n\n\nNo information was found matching that query.\n\n>>> Last update of WHOIS database: 2026-10-31T14:43:31Z <<<\n", "unregistered"},
+		{"zacr reserved", "google.net.za", "Reserved:    a GlobalBlock service\nDomain Name: google.net.za\n", "unknown"},
+		{"aninf not found", "free-name.ga", "%% NOT FOUND\n\n>>> Last update of WHOIS database: 2026-10-31T14:43:30Z <<<\n\n%% This is the ANINF Whois server.\n", "unregistered"},
+		{"aninf registered in French", "google.ga", "Domain ID:                     DOM8624-GA\nNom de domaine:                google.ga\nDate de création:              2023-06-06T19:15:12Z\nRegistrar:                     MARKMONITOR Inc.\nStatut:                        actif\n", "registered"},
+		{"citra available", "free-name.com.kw", ">>> Domain free-name.com.kw is available for registration\n\n>>> Please visit https://rdap.kwregistry.kw/registrars/ for a list of accredited\nregistrars\n", "unregistered"},
 	}
 	for _, c := range cases {
 		if got, reason := classifyWhois(c.domain, c.text); got != c.want {
@@ -56,6 +64,13 @@ func TestDomainsFallBackToWhoisWithoutRDAP(t *testing.T) {
 	}
 	if unsupported := r.Lookup(context.Background(), "name.zz"); unsupported.State != "unknown" || !strings.Contains(unsupported.Reason, "No RDAP or WHOIS") {
 		t.Fatalf("unsupported lookup = %#v", unsupported)
+	}
+}
+
+func TestFirstMeaningfulLineCutsAtACharacter(t *testing.T) {
+	line := firstMeaningfulLine("% banner\n" + strings.Repeat("é", 130))
+	if !utf8.ValidString(line) || line != strings.Repeat("é", 120)+"…" {
+		t.Fatalf("line = %q", line)
 	}
 }
 
