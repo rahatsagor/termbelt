@@ -48,6 +48,21 @@ func TestUnknownCommandAndInvalidOptionsFail(t *testing.T) {
 		}
 	}
 }
+func TestTimeoutZeroIsRejected(t *testing.T) {
+	if _, err := execute(t, []string{"uuid", "--timeout", "0"}, ""); err == nil || !strings.Contains(err.Error(), "3–120") {
+		t.Fatalf("--timeout 0 = %v; want a range error", err)
+	}
+}
+
+func TestRawBase64DecodeIsByteExact(t *testing.T) {
+	for encoded, want := range map[string]string{"AP8Q": "\x00\xff\x10", "aGk=": "hi"} {
+		out, err := execute(t, []string{"base64", "--decode", "--raw"}, encoded)
+		if err != nil || out != want {
+			t.Errorf("%s = %q, %v; want %q", encoded, out, err, want)
+		}
+	}
+}
+
 func TestGenerateZshCompletion(t *testing.T) {
 	out, err := execute(t, []string{"completion", "zsh"}, "")
 	if err != nil || !strings.Contains(out, "#compdef termbelt") {

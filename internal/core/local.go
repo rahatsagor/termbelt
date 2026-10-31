@@ -238,7 +238,7 @@ func base64Tool(r Request) (Result, error) {
 		out = hex.EncodeToString(b)
 		notes = append(notes, "Decoded content is binary; displayed as hexadecimal.")
 	}
-	return Result{Title: "Base64 decoded", Output: out, Notes: notes, Data: map[string]any{"bytes": len(b), "hex": hex.EncodeToString(b)}}, nil
+	return Result{Title: "Base64 decoded", Output: out, RawBytes: b, Notes: notes, Data: map[string]any{"bytes": len(b), "hex": hex.EncodeToString(b)}}, nil
 }
 func urlTool(r Request) (Result, error) {
 	mode := r.Opt("mode", "encode")

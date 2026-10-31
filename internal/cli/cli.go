@@ -65,7 +65,7 @@ func NewCommand(version string) *cobra.Command {
 		if warning != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "termbelt: using default settings: %s\n  fix it with termbelt config set KEY VALUE or termbelt config reset\n", render.Safe(warning.Error()))
 		}
-		if timeout != 0 {
+		if cmd.Flags().Changed("timeout") {
 			if timeout < 3 || timeout > 120 {
 				return nil, fmt.Errorf("timeout must be 3–120 seconds")
 			}
@@ -145,7 +145,8 @@ func NewCommand(version string) *cobra.Command {
 				return err
 			}
 			req := core.Request{Tool: tool.ID, Options: map[string]string{}}
-			cmd.Flags().VisitAll(func(f *pflag.Flag) { req.Options[f.Name] = f.Value.String() })
+			// Global flags such as --raw describe the output, not the tool.
+			cmd.LocalFlags().VisitAll(func(f *pflag.Flag) { req.Options[f.Name] = f.Value.String() })
 			if tool.ID == "regex" {
 				if len(args) == 0 {
 					return fmt.Errorf("a regex pattern is required")
@@ -221,6 +222,10 @@ func NewCommand(version string) *cobra.Command {
 				return enc.Encode(result)
 			}
 			if raw {
+				if result.RawBytes != nil && !isTerminal(out) {
+					_, err := out.Write(result.RawBytes)
+					return err
+				}
 				if result.RawOutput != "" || result.HasRaw {
 					_, err := fmt.Fprintln(out, result.RawOutput)
 					return err
@@ -307,6 +312,11 @@ func interruptibleInput(ctx context.Context, source io.Reader) (io.Reader, func(
 		}
 	})
 	return r, func() { stop(); _ = r.Close() }
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // Tests replace stdin with a reader; only the real os.Stdin can be a terminal.

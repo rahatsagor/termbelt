@@ -141,7 +141,10 @@ type Result struct {
 	// RawOutput replaces Output for --raw when the plain form differs, such as an unquoted JSON string.
 	RawOutput string `json:"-"`
 	// HasRaw marks an intentionally empty RawOutput, such as an extracted "" string.
-	HasRaw     bool     `json:"-"`
+	HasRaw bool `json:"-"`
+	// RawBytes is the exact payload for --raw into a pipe or file, such as
+	// decoded binary data, written without a trailing newline.
+	RawBytes   []byte   `json:"-"`
 	Notes      []string `json:"notes,omitempty"`
 	Data       any      `json:"data,omitempty"`
 	DurationMS int64    `json:"duration_ms"`

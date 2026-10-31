@@ -747,9 +747,6 @@ func (e *Engine) Whois(ctx context.Context, r Request) (Result, error) {
 			result.Sections = append(result.Sections, Section{Title: "REGISTRAR SOURCE", Rows: []Row{row("RDAP", u.String())}})
 			break
 		}
-		if r.Bool("raw") {
-			result.Output = PrettyJSON(lookup.Raw)
-		}
 		return result, nil
 	}
 	if lookup.State == "unregistered" {
