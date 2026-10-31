@@ -44,6 +44,30 @@ func TestSearchArrowAndEnterOpenSelectedTool(t *testing.T) {
 	}
 }
 
+func TestRunRequiresInputLikeTheCLI(t *testing.T) {
+	m := testModel()
+	tool, _ := core.FindTool("hash")
+	m.openTool(tool)
+	if cmd := m.start(); cmd != nil || m.screen != form || m.err == nil {
+		t.Fatalf("empty hash ran: screen=%v err=%v", m.screen, m.err)
+	}
+	for i := range m.fields {
+		if m.fields[i].spec.Key == "file" {
+			m.fields[i].input.SetValue(t.TempDir())
+		}
+	}
+	if m.start(); m.screen != running || m.err != nil {
+		t.Fatalf("hash with a file did not run: screen=%v err=%v", m.screen, m.err)
+	}
+	m.returnHome()
+	for _, id := range []string{"time", "uuid", "ip"} {
+		tool, _ := core.FindTool(id)
+		if tool.RequiresInput() {
+			t.Errorf("%s should run without input", id)
+		}
+	}
+}
+
 func TestCategoryTabAndShiftTabCycle(t *testing.T) {
 	m := testModel()
 	press(m, key(tea.KeyTab))

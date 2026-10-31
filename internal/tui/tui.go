@@ -299,10 +299,14 @@ func (m *Model) start() tea.Cmd {
 			return m.toastCmd("Input was rejected; edit it or use CLI stdin / --file before running")
 		}
 	}
+	req := m.request()
+	if err := m.missingInput(req); err != nil {
+		m.err = err
+		return nil
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
-	req := m.request()
 	if !m.tool.Local {
 		draft := map[string]string{}
 		for i := range m.fields {
@@ -340,6 +344,23 @@ func (m *Model) start() tea.Cmd {
 		}
 	}()
 	return tea.Batch(waitJob(events, id), tick(id))
+}
+
+// missingInput matches the CLI, which refuses to run these tools without
+// input rather than answer for an empty string.
+func (m *Model) missingInput(req core.Request) error {
+	if !m.tool.RequiresInput() || req.Input != "" || req.Options["file"] != "" {
+		return nil
+	}
+	for _, field := range m.tool.Fields {
+		if field.Key == "input" {
+			if m.tool.ID == "hash" {
+				return fmt.Errorf("enter text to hash, or choose a file")
+			}
+			return fmt.Errorf("%s is required", field.Label)
+		}
+	}
+	return nil
 }
 func (m *Model) setResultContent() {
 	if m.err != nil {

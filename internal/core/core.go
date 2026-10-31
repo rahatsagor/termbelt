@@ -65,6 +65,21 @@ var Tools = []Tool{
 	{ID: "cidr", Name: "Subnet calculator", Category: "NETWORK", Description: "IPv4 / IPv6 ranges, masks and address counts", Hint: "Runs locally. Enter a CIDR prefix; optionally check if an IP belongs to it.", Example: "termbelt cidr 192.168.1.0/24 --contains 192.168.1.42", Local: true, Fields: []Field{{Key: "input", Label: "CIDR prefix", Placeholder: "192.168.1.0/24"}, {Key: "contains", Label: "Check an IP (optional)", Placeholder: "192.168.1.42"}}},
 }
 
+// RequiresInput reports whether an empty input would still produce a
+// plausible answer, such as the hash of nothing, so callers must ask for it.
+// ip and time read empty input as "my address" and "now".
+func (t Tool) RequiresInput() bool {
+	if t.ID == "ip" || t.ID == "time" {
+		return false
+	}
+	for _, field := range t.Fields {
+		if field.Key == "input" {
+			return true
+		}
+	}
+	return false
+}
+
 func FindTool(id string) (Tool, bool) {
 	for _, t := range Tools {
 		if t.ID == id {

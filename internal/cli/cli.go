@@ -167,9 +167,7 @@ func NewCommand(version string) *cobra.Command {
 			if tool.ID == "regex" {
 				hasArg = len(args) > 1
 			}
-			// An empty input would otherwise produce a plausible result, such as
-			// the hash of nothing. Only time treats empty input as "now".
-			if mode != "" && !hasArg && req.Options["file"] == "" && tool.ID != "time" && stdinIsTerminal(cmd) {
+			if tool.RequiresInput() && !hasArg && req.Options["file"] == "" && stdinIsTerminal(cmd) {
 				return fmt.Errorf("pass the input as an argument or pipe it on stdin")
 			}
 			if mode != "" && !hasArg && req.Options["file"] == "" && !stdinIsTerminal(cmd) {
