@@ -1,13 +1,16 @@
 VERSION ?= $(shell bun -p 'require("./package.json").version')
 PREFIX ?= $(HOME)/.local/bin
 
-.PHONY: build test check smoke edge-smoke live-smoke fuzz vuln install clean
+.PHONY: build test check lint smoke edge-smoke live-smoke fuzz vuln install clean
 build:
 	go build -buildvcs=false -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o build/termbelt .
 test:
 	go test -race ./...
 check: test
 	go vet ./...
+lint:
+	@unformatted="$$(gofmt -l .)"; if [ -n "$$unformatted" ]; then echo "Run gofmt -w on:"; echo "$$unformatted"; exit 1; fi
+	go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 smoke: build
 	python3 scripts/smoke.py --binary build/termbelt
 edge-smoke: build
