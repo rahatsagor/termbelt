@@ -18,7 +18,7 @@ fuzz:
 	go test ./internal/core -run '^$$' -fuzz '^FuzzDomainNormalization$$' -fuzztime 10s -parallel 2
 	go test ./internal/core -run '^$$' -fuzz '^FuzzTimestampParsing$$' -fuzztime 10s -parallel 2
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 install: build
 	mkdir -p "$(PREFIX)"
 	@set -e; task_install_tmp="$$(mktemp "$(PREFIX)/.termbelt-install.XXXXXX")"; \

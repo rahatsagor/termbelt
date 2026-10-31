@@ -53,7 +53,7 @@ async function publish(target) {
     return;
   }
   const args = ci
-    ? ["x", "npm@12.2.0", "publish", target.path, "--access", "public", "--provenance"]
+    ? ["x", "npm@12.2.1", "publish", target.path, "--access", "public", "--provenance"]
     : ["publish", target.path, "--access", "public", "--tolerate-republish"];
   const result = spawnSync(process.execPath, args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
