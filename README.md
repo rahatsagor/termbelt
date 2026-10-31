@@ -288,7 +288,7 @@ Run `termbelt COMMAND --help` for every flag.
 | `dns`      | A, AAAA, MX, NS, TXT, CNAME, SOA, CAA, SRV or any other type; PTR for IPs          | `termbelt dns _dmarc.example.com --type TXT`               |
 | `tls`      | Certificate chain, issuer, validity, trust, SANs, key, ALPN, fingerprints, cipher | `termbelt tls https://example.com`                         |
 | `http`     | Status, redirects, headers, DNS / TCP / TLS / TTFB / total timings                | `termbelt http https://example.com`                        |
-| `ping`     | Repeated TCP connection latency and failure rate (host, host:port or URL)         | `termbelt ping example.com:443 --count 10`                 |
+| `ping`     | Repeated TCP connection latency and failure rate (host, host:port or URL)         | `termbelt ping example.com:443 --count 10 --wait 5`        |
 | `ports`    | Local processes listening on TCP ports                                            | `termbelt ports --port 3000`                               |
 | `json`     | Validate, format, minify, extract paths; keeps key order and big numbers           | `termbelt json --path 'users[0].name' < data.json`         |
 | `base64`   | Standard / URL-safe Base64 encode and decode                                      | `printf hello \| termbelt base64 --raw`                    |
@@ -299,7 +299,7 @@ Run `termbelt COMMAND --help` for every flag.
 | `password` | Secure random passwords with every required character class                      | `termbelt password --length 32 --no-symbols --raw`         |
 | `time`     | Exact Unix s / ms / µs / ns, fractional timestamps, dates and timezones            | `termbelt time 1735689600123456789 --unit ns`              |
 | `cron`     | Upcoming runs with timezone and daylight-saving rules                             | `termbelt cron '*/15 * * * *' --zone Asia/Dhaka`           |
-| `regex`    | Go / RE2 matches, byte ranges, numbered and named captures                        | `termbelt regex '(?P<word>[a-z]+)' 'hello 123 world'`      |
+| `regex`    | Go / RE2 matches, byte ranges, numbered and named captures in pattern order       | `termbelt regex '(?P<word>[a-z]+)' 'hello 123 world'`      |
 | `cidr`     | IPv4 / IPv6 ranges, masks, wildcard, host range, counts, membership               | `termbelt cidr 192.168.1.0/24 --contains 192.168.1.42`     |
 
 Also: `termbelt config` for settings, `termbelt completion <shell>`, and `termbelt --version`.
@@ -309,9 +309,9 @@ Also: `termbelt config` for settings, `termbelt completion <shell>`, and `termbe
 | Flag / variable  | Effect                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
 | `--json`         | A stable envelope: `tool`, `title`, `summary`, `output`, `table`, `metrics`, `sections`, `notes`, `data`, `duration_ms` |
-| `--raw`          | Just the transformed text (extracted JSON strings unquoted, like `jq -r`), or the JSON data when there is no text |
+| `--raw`          | Just the transformed text (extracted JSON strings unquoted, like `jq -r`), or the JSON data when there is no text. Decoded Base64 goes to a pipe or file byte-exact |
 | `--plain`, `NO_COLOR=1` | No colors. Output that is not a terminal is plain automatically                                       |
-| `--timeout 3–120` | Network request timeout in seconds (default 20)                                                             |
+| `--timeout 3–120` | Network request timeout in seconds (default 20). `ping` uses `--wait` per connection instead                |
 
 `--json` and `--raw` can't be combined. Progress goes to stderr and is turned off for JSON and raw output. Failures exit with status 1 and a message on stderr.
 
@@ -333,6 +333,8 @@ termbelt time -- -1234567890          # negative values go after --
 - `domains`, `whois`, `site`, `dns`, `tls`, `http`, `ping`, `url`, `cidr` and `cron` read their target from stdin when no argument is given; one trailing newline is dropped.
 - `hash` streams stdin and regular files with bounded memory and can be canceled. Use `hash --file` for a file, or pipe a stream into it.
 - An argument is always one value, even with spaces or shell characters in it.
+- Tools that need input refuse to run without it, in the workbench too, rather than answer for an empty string. `ip` and `time` read empty input as your address and now.
+- Dates can be RFC3339 or local `YYYY-MM-DD HH:MM:SS` with a space or `T`. `jwt` accepts a token with its `Bearer ` prefix.
 - Timestamp units are detected by size. Use `--unit s`, `ms`, `us` or `ns` for historical or small values. Fractional timestamps keep exact nanoseconds, negative ones included.
 - JSON paths use dots and indices (`users.0.name`), brackets for keys with dots (`users[0]["display.name"]`), and negative indices from the end (`items[-1]`). Formatting keeps key order, characters such as `<`, `>` and `&`, and exact numbers.
 - Base64 output that isn't UTF-8 text is shown as hexadecimal. `url` encodes a single component; `--mode inspect` takes a whole URL.
@@ -403,12 +405,13 @@ pbpaste | termbelt jwt          # macOS; use wl-paste or xclip -o on Linux
 <br>
 
 - Termbelt follows [IANA's RDAP bootstrap](https://www.iana.org/assignments/rdap-dns) to the authoritative registry. A registered record must match the requested domain, and a valid authoritative not-found answer means **unregistered**.
-- Many ccTLDs, including `.io`, `.co`, `.me` and `.sh`, have no RDAP service. For those, Termbelt asks the registry's WHOIS server from a bundled IANA snapshot. WHOIS replies are free-form, so they're read conservatively: only an explicit not-found or "free" answer counts as unregistered, only a matching registration record counts as registered, and reserved, refused or ambiguous replies stay **unknown**.
+- Many ccTLDs, including `.io`, `.co`, `.me` and `.sh`, have no RDAP service. For those, Termbelt asks the registry's WHOIS server from a bundled IANA snapshot, plus registry servers IANA doesn't list: `.cd`, `.ga`, `.kw`, `.ps`, `.sl`, and `co.za`, `net.za`, `org.za` and `web.za`. WHOIS replies are free-form, so they're read conservatively: only an explicit not-found or "free" answer counts as unregistered, only a matching registration record counts as registered, and reserved, refused or ambiguous replies stay **unknown**.
 - Empty RDAP 404s, such as Verisign's, count only when they carry the RDAP media type and stay on the authoritative service. Unsupported TLDs, rate limits, redirects to unrelated services, malformed responses and timeouts stay **unknown**.
 - Unregistered doesn't mean you can buy it: a name can be reserved, premium, restricted or blocked by policy. Confirm with a registrar.
 - `--all` checks [every root-zone TLD](https://data.iana.org/TLD/tlds-alpha-by-domain.txt), including brand and internationalized ones, and can take several minutes. Give multi-label suffixes such as `co.uk` or `com.bd` with `--tlds`. `--all` and `--tlds` can't be combined. A full domain is checked exactly; a subdomain prompts you to use the registrable domain.
 - Up to six lookups run at once (`--concurrency 1–12`), interleaved across registries and paced per registry host. The 8-second deadline starts after pacing. A registry's HTTP 429 pauses further requests to it for its `Retry-After` window instead of hammering it.
-- `--only-unregistered` filters the table but keeps every result in JSON. `--refresh` updates registry metadata right away, even when the cache can't be written.
+- `--only-unregistered` filters the table but keeps every result in JSON. Each JSON result has the state, reason and registrar; use `whois` for the full record.
+- `--refresh` updates registry metadata right away, even when the cache can't be written. A refreshed cache is used until an update of Termbelt bundles newer data.
 
 </details>
 
@@ -540,6 +543,7 @@ make build && build/termbelt
 | Command                  | What it does                                                           |
 | ------------------------ | ---------------------------------------------------------------------- |
 | `make check`             | Tests with the race detector, then `go vet`                            |
+| `make lint`              | `gofmt` and `staticcheck`                                              |
 | `make smoke`             | Offline checks against the built executable                            |
 | `make edge-smoke`        | Large stdin, cancellation and malformed-input checks                   |
 | `make live-smoke`        | Real provider, DNS, TLS and speed checks                               |

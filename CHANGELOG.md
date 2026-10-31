@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- `whois` and `domains` support `.cd`, `.ga`, `.kw`, `.ps`, `.sl` and the South African `co.za`, `net.za`, `org.za` and `web.za` registries, which publish no RDAP service and are missing from IANA's WHOIS list. Servers are chosen by the longest matching suffix.
+- A settings file with one invalid value keeps its other settings instead of falling back to all defaults, so a configured IP API is still used and lookups don't go to ipwho.is.
+- The workbench refuses to run a tool that needs input when the input is empty, like the CLI, instead of returning the hash or encoding of nothing.
+- `base64 --decode --raw` writes the exact decoded bytes to a pipe or file, binary data included, with no added newline.
+- `--timeout 0` is rejected like any other value outside 3–120.
+- WHOIS disclaimers such as "contact information is not available" no longer turn a registered domain into unknown. Long WHOIS reasons no longer end in a broken character.
+- `http` and `site` accept a bare IPv6 address. `time` accepts `2026-01-01T10:00:00`. `jwt` accepts a `Bearer ` prefix.
+- `regex` lists capture groups in pattern order, and `--json` adds an ordered `captures` list to each match.
+- `ping --wait` sets the seconds to wait for each connection (1–30, default 3).
+- `domains --json` reports each domain's registrar instead of embedding its full RDAP record, which kept `--all` output and memory large. Use `whois` for the full record.
+- A refreshed IANA cache is kept until a newer Termbelt bundles fresher data, instead of expiring after seven days into possibly older bundled data. `--refresh` sends the Termbelt User-Agent.
+- Updated Bubble Tea to 2.1.1, golang.org/x/net to 0.62.0, ultraviolet, go-runewidth 0.0.31 and xo/terminfo 1.3.0. Release builds use Go 1.27.3 and Bun 1.4.4; the vulnerability scan uses govulncheck 1.9.0.
+- CI checks `gofmt` and runs `staticcheck` (`make lint`).
+
 ## 1.2.1
 
 - The workbench no longer stops responding to every key, including Ctrl+C, after the Mac sleeps. It reads keys from `/dev/tty` instead of polling stdin with kqueue, which can stop reporting a terminal as readable. If terminal input ever closes, the workbench exits and restores the terminal instead of hanging.
