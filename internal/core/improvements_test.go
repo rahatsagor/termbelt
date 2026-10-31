@@ -121,7 +121,7 @@ func TestSaveFavoritesRepairsDamagedSettings(t *testing.T) {
 	if err := SaveFavorites([]string{"json"}); err != nil {
 		t.Fatal(err)
 	}
-	if c, err := LoadConfig(); err != nil || strings.Join(c.Favorites, ",") != "json" || c.TimeoutSeconds != 20 {
+	if c, err := loadConfig(); err != nil || strings.Join(c.Favorites, ",") != "json" || c.TimeoutSeconds != 20 {
 		t.Fatalf("config = %#v, %v", c, err)
 	}
 }
@@ -133,7 +133,7 @@ func TestConfigSetAndResetRepairInvalidSettings(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"timeout_seconds":1,"favorites":["json"]}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadConfig(); err == nil {
+	if _, err := loadConfig(); err == nil {
 		t.Fatal("strict load accepted invalid timeout")
 	}
 	c, warning, err := LoadEffectiveConfig()
@@ -143,7 +143,7 @@ func TestConfigSetAndResetRepairInvalidSettings(t *testing.T) {
 	if err := c.Set("timeout-seconds", "30"); err != nil {
 		t.Fatal(err)
 	}
-	repaired, err := LoadConfig()
+	repaired, err := loadConfig()
 	if err != nil || repaired.TimeoutSeconds != 30 || strings.Join(repaired.Favorites, ",") != "json" {
 		t.Fatalf("repaired = %#v, %v", repaired, err)
 	}
@@ -153,14 +153,30 @@ func TestConfigSetAndResetRepairInvalidSettings(t *testing.T) {
 	if err := ResetConfig(); err != nil {
 		t.Fatal(err)
 	}
-	if reset, err := LoadConfig(); err != nil || reset.TimeoutSeconds != 20 {
+	if reset, err := loadConfig(); err != nil || reset.TimeoutSeconds != 20 {
 		t.Fatalf("reset = %#v, %v", reset, err)
 	}
 	if err := c.Set("favorites", "dns, tls"); err != nil {
 		t.Fatal(err)
 	}
-	if fav, _ := LoadConfig(); strings.Join(fav.Favorites, ",") != "dns,tls" {
+	if fav, _ := loadConfig(); strings.Join(fav.Favorites, ",") != "dns,tls" {
 		t.Fatalf("favorites = %v", fav.Favorites)
+	}
+}
+
+func TestEffectiveConfigKeepsValidSettingsBesideABadOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("TERMBELT_CONFIG", path)
+	t.Setenv("TERMBELT_IP_API_URL", "")
+	if err := os.WriteFile(path, []byte(`{"timeout_seconds":1,"ip_api_url":"https://ip.example/api","favorites":["json","dns"]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, warning, err := LoadEffectiveConfig()
+	if err != nil || warning == nil {
+		t.Fatalf("warning = %v, err = %v", warning, err)
+	}
+	if c.IPAPIURL != "https://ip.example/api" || strings.Join(c.Favorites, ",") != "json,dns" || c.TimeoutSeconds != 20 {
+		t.Fatalf("effective config = %#v; want the valid IP API and favorites kept", c)
 	}
 }
 

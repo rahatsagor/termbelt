@@ -56,24 +56,14 @@ func loadConfigFile() (Config, error) {
 	return normalizeConfig(c)
 }
 
-func LoadConfig() (Config, error) {
-	c, err := loadConfigFile()
-	if err != nil {
-		return c, err
-	}
-	if v := os.Getenv("TERMBELT_IP_API_URL"); v != "" {
-		c.IPAPIURL = strings.TrimRight(v, "/")
-	}
-	return normalizeConfig(c)
-}
-
 // LoadEffectiveConfig keeps utilities usable when the settings file is broken:
-// the problem is returned as a warning and defaults are used instead.
+// the problem is returned as a warning, and every setting that is still valid
+// is kept so that one bad value cannot silently drop a configured IP API.
 // Environment overrides remain strict because they were set for this run.
 func LoadEffectiveConfig() (config Config, warning error, err error) {
 	config, warning = loadConfigFile()
 	if warning != nil {
-		config = DefaultConfig()
+		config = loadRepairableConfig()
 	}
 	if v := os.Getenv("TERMBELT_IP_API_URL"); v != "" {
 		config.IPAPIURL = strings.TrimRight(v, "/")

@@ -259,14 +259,14 @@ func TestFastParserMatchesPublicScript(t *testing.T) {
 }
 func TestConfigRoundtripDoesNotStoreToolInputs(t *testing.T) {
 	t.Setenv("TERMBELT_CONFIG", t.TempDir()+"/config.json")
-	c, err := LoadConfig()
+	c, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = c.Set("ip-api-url", "https://api.test/"); err != nil {
 		t.Fatal(err)
 	}
-	c2, err := LoadConfig()
+	c2, err := loadConfig()
 	if err != nil || c2.IPAPIURL != "https://api.test" {
 		t.Fatalf("config: %#v, %v", c2, err)
 	}

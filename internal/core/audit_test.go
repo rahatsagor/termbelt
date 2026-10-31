@@ -93,7 +93,7 @@ func TestAuditConfigRejectsNullOversizedAndBadPorts(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Setenv("TERMBELT_CONFIG", path)
-			if _, err := LoadConfig(); err == nil {
+			if _, err := loadConfig(); err == nil {
 				t.Fatal("invalid config accepted")
 			}
 		})
@@ -109,7 +109,7 @@ func TestAuditConfigCleansFavoritesAndMutationsPreserveDiskOverrides(t *testing.
 	t.Setenv("TERMBELT_CONFIG", path)
 	t.Setenv("TERMBELT_IP_API_URL", "https://environment.example/api")
 
-	c, err := LoadConfig()
+	c, err := loadConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestAuditConfigCleansFavoritesAndMutationsPreserveDiskOverrides(t *testing.
 		t.Fatalf("favorites = %s, want deduplicated [json]", got)
 	}
 	if c.IPAPIURL != "https://environment.example/api" {
-		t.Fatalf("LoadConfig URL override = %q", c.IPAPIURL)
+		t.Fatalf("loadConfig URL override = %q", c.IPAPIURL)
 	}
 	if err := SaveFavorites([]string{"uuid", "uuid", "unknown"}); err != nil {
 		t.Fatal(err)
