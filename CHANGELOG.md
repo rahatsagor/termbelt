@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.0
 
 - `whois` and `domains` support `.cd`, `.ga`, `.kw`, `.ps`, `.sl` and the South African `co.za`, `net.za`, `org.za` and `web.za` registries, which publish no RDAP service and are missing from IANA's WHOIS list. Servers are chosen by the longest matching suffix.
 - A settings file with one invalid value keeps its other settings instead of falling back to all defaults, so a configured IP API is still used and lookups don't go to ipwho.is.
