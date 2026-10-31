@@ -87,7 +87,7 @@ func loadMetadata(name string) []byte {
 	}
 	p := filepath.Join(base, name)
 	info, err := os.Stat(p)
-	if err != nil || time.Since(info.ModTime()) > 7*24*time.Hour || info.Size() > maxResponse {
+	if err != nil || info.Size() > maxResponse {
 		return nil
 	}
 	f, err := os.Open(p)
@@ -97,6 +97,39 @@ func loadMetadata(name string) []byte {
 	defer f.Close()
 	b, _ := readLimited(f, maxResponse)
 	return b
+}
+
+// rdapPublication and tldVersion date each metadata copy, so a refreshed
+// cache is used until a newer binary bundles fresher data.
+func rdapPublication(b []byte) int64 {
+	var data struct {
+		Publication string `json:"publication"`
+	}
+	if json.Unmarshal(b, &data) != nil {
+		return 0
+	}
+	t, err := time.Parse(time.RFC3339, data.Publication)
+	if err != nil {
+		return 0
+	}
+	return t.Unix()
+}
+
+func tldVersion(b []byte) int64 {
+	header, _, _ := strings.Cut(string(b), "\n")
+	fields := strings.Fields(strings.TrimPrefix(header, "# Version "))
+	if len(fields) == 0 {
+		return 0
+	}
+	version, _ := strconv.ParseInt(strings.TrimSuffix(fields[0], ","), 10, 64)
+	return version
+}
+
+func newerMetadata(cached, embedded []byte, version func([]byte) int64) []byte {
+	if cached != nil && version(cached) >= version(embedded) {
+		return cached
+	}
+	return embedded
 }
 
 func parseBootstrap(b []byte) (map[string][]string, error) {
@@ -164,14 +197,14 @@ func (r *Registry) ensure(ctx context.Context) error {
 	if r.loaded {
 		return nil
 	}
-	endpoints, err := parseBootstrap(loadMetadata("rdap.json"))
+	endpoints, err := parseBootstrap(newerMetadata(loadMetadata("rdap.json"), embeddedRDAP, rdapPublication))
 	if err != nil {
 		endpoints, err = parseBootstrap(embeddedRDAP)
 		if err != nil {
 			return fmt.Errorf("invalid bundled registry metadata: %w", err)
 		}
 	}
-	tlds, err := parseTLDs(string(loadMetadata("tlds.txt")))
+	tlds, err := parseTLDs(string(newerMetadata(loadMetadata("tlds.txt"), []byte(embeddedTLDs), tldVersion)))
 	if err != nil {
 		tlds, err = parseTLDs(embeddedTLDs)
 		if err != nil {
@@ -186,6 +219,7 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	metadata := map[string][]byte{}
 	for _, entry := range []struct{ name, url string }{{"rdap.json", "https://data.iana.org/rdap/dns.json"}, {"tlds.txt", "https://data.iana.org/TLD/tlds-alpha-by-domain.txt"}} {
 		req, _ := http.NewRequestWithContext(ctx, "GET", entry.url, nil)
+		req.Header.Set("User-Agent", UserAgent)
 		resp, err := r.client.Do(req)
 		if err != nil {
 			return err
@@ -567,6 +601,12 @@ func (e *Engine) Domains(ctx context.Context, req Request, emit Emit) (Result, e
 					continue
 				}
 				result := e.RDAP.Lookup(ctx, domains[index])
+				// Keep only the registrar: full RDAP records for every
+				// registered name in --all mode are large; whois shows them.
+				if result.Raw != nil {
+					result.Registrar = rdapRegistrarName(result.Raw)
+					result.Raw = nil
+				}
 				results[index] = result
 				n := done.Add(1)
 				report(emit, Progress{Message: fmt.Sprintf("%d / %d checked · %s · %s", n, len(domains), result.Domain, result.State), Fraction: float64(n) / float64(len(domains))})
@@ -597,9 +637,6 @@ func (e *Engine) Domains(ctx context.Context, req Request, emit Emit) (Result, e
 		detail := r.Reason
 		if r.State == "registered" {
 			detail = nonempty(r.Registrar, "Registry record found")
-			if r.Raw != nil {
-				detail = rdapRegistrar(r.Raw)
-			}
 		}
 		if r.Protocol == "whois" && !strings.Contains(detail, "WHOIS") {
 			detail += " (WHOIS)"
@@ -665,13 +702,16 @@ func rdapContacts(data map[string]any) []Row {
 	visit(entities, 0)
 	return rows
 }
-func rdapRegistrar(data map[string]any) string {
+func rdapRegistrarName(data map[string]any) string {
 	for _, r := range rdapContacts(data) {
 		if strings.Contains(r.Label, "registrar") && strings.HasSuffix(r.Label, "fn") {
 			return r.Value
 		}
 	}
-	return "Registry record found"
+	return ""
+}
+func rdapRegistrar(data map[string]any) string {
+	return nonempty(rdapRegistrarName(data), "Registry record found")
 }
 func rdapSections(d RDAPLookup) []Section {
 	data := d.Raw

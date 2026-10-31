@@ -429,29 +429,24 @@ type DNSRecord struct {
 	Value string `json:"value"`
 }
 
+// dnsResolver parses a custom resolver given as IP or IP:port.
 func dnsResolver(custom string) (string, error) {
 	custom = strings.TrimSpace(custom)
-	if custom != "" {
-		host := strings.Trim(custom, "[]")
-		if h, p, err := net.SplitHostPort(custom); err == nil {
-			if _, err = netip.ParseAddr(h); err != nil {
-				return "", fmt.Errorf("resolver must be an IP address")
-			}
-			n, err := strconv.Atoi(p)
-			if err != nil || n < 1 || n > 65535 {
-				return "", fmt.Errorf("invalid resolver port")
-			}
-			return net.JoinHostPort(h, p), nil
+	if h, p, err := net.SplitHostPort(custom); err == nil {
+		if _, err = netip.ParseAddr(h); err != nil {
+			return "", fmt.Errorf("resolver must be an IP address")
 		}
-		if _, err := netip.ParseAddr(host); err != nil {
-			return "", fmt.Errorf("resolver must be an IP address, optionally with a port")
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid resolver port")
 		}
-		return net.JoinHostPort(host, "53"), nil
+		return net.JoinHostPort(h, p), nil
 	}
-	if servers := systemResolverList(); len(servers) > 0 {
-		return servers[0], nil
+	host := strings.Trim(custom, "[]")
+	if _, err := netip.ParseAddr(host); err != nil {
+		return "", fmt.Errorf("resolver must be an IP address, optionally with a port")
 	}
-	return "", fmt.Errorf("could not read the system DNS resolver; specify --resolver 1.1.1.1")
+	return net.JoinHostPort(host, "53"), nil
 }
 
 // systemResolverList is replaced in tests.

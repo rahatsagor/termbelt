@@ -74,6 +74,9 @@ func TestRegistryRefreshUsesFreshDataWithUnavailableCache(t *testing.T) {
 	}
 	t.Setenv("TERMBELT_CACHE_DIR", cache)
 	r := NewRegistry(&http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("User-Agent") != UserAgent {
+			return nil, fmt.Errorf("User-Agent = %q", req.Header.Get("User-Agent"))
+		}
 		if strings.HasSuffix(req.URL.Path, ".json") {
 			return response(req, 200, `{"services":[[["com"],["https://fresh.test/rdap"]]]}`), nil
 		}
@@ -276,4 +279,47 @@ func FuzzTimestampParsing(f *testing.F) {
 			t.Fatalf("out-of-range date: %v", date)
 		}
 	})
+}
+
+func TestRegistryPrefersTheNewerMetadataCopy(t *testing.T) {
+	for publication, want := range map[string]string{"2000-01-01T00:00:00Z": "", "2999-01-01T00:00:00Z": "https://cached.test/rdap"} {
+		cache := t.TempDir()
+		t.Setenv("TERMBELT_CACHE_DIR", cache)
+		path := filepath.Join(cache, "rdap.json")
+		body := `{"publication":"` + publication + `","services":[[["com"],["https://cached.test/rdap"]]]}`
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Age alone must not discard a cache that is newer than the bundled copy.
+		old := time.Now().Add(-90 * 24 * time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		r := NewRegistry(http.DefaultClient)
+		if err := r.ensure(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		got := r.endpoint("example.com")
+		if (want == "" && got == "https://cached.test/rdap") || (want != "" && got != want) {
+			t.Errorf("publication %s: endpoint = %s", publication, got)
+		}
+	}
+	if tldVersion([]byte(embeddedTLDs)) < 2026000000 {
+		t.Fatalf("bundled TLD version = %d", tldVersion([]byte(embeddedTLDs)))
+	}
+}
+
+func TestDomainsKeepOnlyTheRegistrar(t *testing.T) {
+	r := registryFor(t, func(req *http.Request) (*http.Response, error) {
+		return response(req, 200, `{"objectClassName":"domain","ldhName":"brand.test","entities":[{"roles":["registrar"],"vcardArray":["vcard",[["fn",{},"text","Example Registrar"]]]}]}`), nil
+	})
+	e := &Engine{RDAP: r}
+	result, err := e.Domains(context.Background(), Request{Input: "brand", Options: map[string]string{"tlds": "test"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := result.Data.(map[string]any)["domains"].([]RDAPLookup)[0]
+	if got.State != "registered" || got.Registrar != "Example Registrar" || got.Raw != nil || result.Table.Rows[0][2] != "Example Registrar" {
+		t.Fatalf("lookup = %#v, row = %v", got, result.Table.Rows[0])
+	}
 }
