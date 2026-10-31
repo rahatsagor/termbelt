@@ -165,5 +165,17 @@
     "xn--xkc2dl3a5ee0h": "whois.nixiregistry.in",
     "xn--y9a3aq": "whois.amnic.net",
     "xn--ygbi2ammx": "whois.pnina.ps"
+  },
+  "supplemental_description": "Registry WHOIS servers that IANA does not list, for TLDs and public suffixes without RDAP; checked by hand against each registry",
+  "supplemental": {
+    "cd": "whois.nic.cd",
+    "co.za": "whois.registry.net.za",
+    "ga": "whois.nic.ga",
+    "kw": "whois.nic.kw",
+    "net.za": "whois.registry.net.za",
+    "org.za": "whois.registry.net.za",
+    "ps": "whois.registry.ps",
+    "sl": "whois.nic.sl",
+    "web.za": "whois.registry.net.za"
   }
 }

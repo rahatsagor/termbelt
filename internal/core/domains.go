@@ -370,7 +370,7 @@ func (r *Registry) lookupOrder(domains []string) []int {
 		host := u.Host
 		if host == "" {
 			// TLDs without RDAP are queried over WHOIS; group them by that server instead.
-			host = "whois:" + bundledWhois[domain[strings.LastIndex(domain, ".")+1:]]
+			host = "whois:" + bundledWhoisServer(domain)
 		}
 		if _, ok := groups[host]; !ok {
 			keys = append(keys, host)
@@ -405,7 +405,7 @@ func (r *Registry) Lookup(ctx context.Context, domain string) RDAPLookup {
 	result := r.lookupRDAP(ctx, domain)
 	if result.Protocol == "" && result.State == "unknown" && ctx.Err() == nil {
 		tld := domain[strings.LastIndex(domain, ".")+1:]
-		if server, _ := r.whoisServer(ctx, tld, false); server != "" {
+		if server, _ := r.whoisServer(ctx, domain, false); server != "" {
 			return r.lookupWhois(ctx, domain, server)
 		}
 		result.Reason = "No RDAP or WHOIS service published by IANA for ." + tld
@@ -757,7 +757,7 @@ func (e *Engine) Whois(ctx context.Context, r Request) (Result, error) {
 	}
 	reason := nonempty(lookup.Reason, "no RDAP service published by IANA")
 	tld := domain[strings.LastIndex(domain, ".")+1:]
-	server, err := e.RDAP.whoisServer(ctx, tld, true)
+	server, err := e.RDAP.whoisServer(ctx, domain, true)
 	if err != nil {
 		return Result{}, fmt.Errorf("RDAP inconclusive (%s); WHOIS fallback unavailable: %w", reason, err)
 	}

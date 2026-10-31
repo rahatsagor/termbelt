@@ -16,22 +16,39 @@ import (
 var embeddedWhois []byte
 
 // bundledWhois maps TLDs that have no RDAP bootstrap entry to the legacy
-// WHOIS server IANA publishes for them. Refresh with scripts/whois_servers.py.
+// WHOIS server IANA publishes for them, plus registry servers IANA does not
+// list. Keys can be multi-label public suffixes such as co.za, whose registry
+// differs from the TLD's. Refresh with scripts/whois_servers.py.
 var bundledWhois = func() map[string]string {
 	var data struct {
-		Servers map[string]string `json:"servers"`
+		Servers      map[string]string `json:"servers"`
+		Supplemental map[string]string `json:"supplemental"`
 	}
 	if err := json.Unmarshal(embeddedWhois, &data); err != nil {
 		panic("invalid bundled WHOIS metadata: " + err.Error())
 	}
 	servers := map[string]string{}
-	for tld, server := range data.Servers {
-		if validateLabel(tld) == nil && validWhoisServer(server) {
-			servers[tld] = server
+	for _, source := range []map[string]string{data.Supplemental, data.Servers} {
+		for suffix, server := range source {
+			if _, err := domainASCII(suffix); err == nil && suffix == strings.ToLower(suffix) && validWhoisServer(server) {
+				servers[suffix] = server
+			}
 		}
 	}
 	return servers
 }()
+
+// bundledWhoisServer returns the server for the longest bundled suffix of
+// domain, so example.co.za uses the co.za registry rather than .za.
+func bundledWhoisServer(domain string) string {
+	labels := strings.Split(domain, ".")
+	for i := 1; i < len(labels); i++ {
+		if server := bundledWhois[strings.Join(labels[i:], ".")]; server != "" {
+			return server
+		}
+	}
+	return ""
+}
 
 func validWhoisServer(server string) bool {
 	if !strings.Contains(server, ".") {
@@ -74,15 +91,16 @@ func normalizeWhoisText(text string) string {
 	return strings.TrimSpace(text)
 }
 
-// whoisServer returns the legacy WHOIS server for a TLD: the bundled snapshot
-// first, then a live IANA referral when allowed.
-func (r *Registry) whoisServer(ctx context.Context, tld string, live bool) (string, error) {
-	if server := bundledWhois[tld]; server != "" {
+// whoisServer returns the legacy WHOIS server for a domain: the bundled
+// snapshot first, then a live IANA referral for its TLD when allowed.
+func (r *Registry) whoisServer(ctx context.Context, domain string, live bool) (string, error) {
+	if server := bundledWhoisServer(domain); server != "" {
 		return server, nil
 	}
 	if !live {
 		return "", nil
 	}
+	tld := domain[strings.LastIndex(domain, ".")+1:]
 	root, err := r.whoisQuery(ctx, "whois.iana.org", tld)
 	if err != nil {
 		return "", err

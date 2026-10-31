@@ -79,3 +79,28 @@ func TestWhoisTextNormalizesLineEndings(t *testing.T) {
 		t.Fatalf("normalized = %q", got)
 	}
 }
+
+func TestSupplementalWhoisServersCoverSuffixes(t *testing.T) {
+	for domain, want := range map[string]string{
+		"example.co.za":  "whois.registry.net.za",
+		"example.web.za": "whois.registry.net.za",
+		"example.cd":     "whois.nic.cd",
+		"example.com.kw": "whois.nic.kw",
+		"example.io":     "whois.nic.io",
+		"example.za":     "",
+		"za":             "",
+	} {
+		if got := bundledWhoisServer(domain); got != want {
+			t.Errorf("%s = %q, want %q", domain, got, want)
+		}
+	}
+	r := registryFor(t, nil)
+	queried := ""
+	r.queryWhois = func(_ context.Context, server, query string) (string, error) {
+		queried = server + " " + query
+		return "Available\n\n\n\nNo information was found matching that query.\n", nil
+	}
+	if got := r.Lookup(context.Background(), "free.co.za"); got.State != "unregistered" || queried != "whois.registry.net.za free.co.za" {
+		t.Fatalf("lookup = %#v via %q", got, queried)
+	}
+}
