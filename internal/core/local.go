@@ -57,6 +57,9 @@ func RunLocal(r Request) (Result, error) {
 	}
 }
 func decodeJSON(input string) (any, error) {
+	if strings.TrimSpace(input) == "" {
+		return nil, fmt.Errorf("invalid JSON: input is empty")
+	}
 	d := json.NewDecoder(strings.NewReader(input))
 	d.UseNumber()
 	var v any
@@ -256,17 +259,31 @@ func urlTool(r Request) (Result, error) {
 		return Result{Title: "URL decoded", Output: s}, nil
 	case "inspect":
 		u, err := url.Parse(r.Input)
-		if err != nil {
-			return Result{}, err
+		if err != nil || u.Host == "" || u.Scheme == "" {
+			// Parsing errors can contain the input URL, including credentials.
+			return Result{}, fmt.Errorf("enter a valid absolute URL including its scheme")
 		}
-		if u.Host == "" || u.Scheme == "" {
-			return Result{}, fmt.Errorf("enter an absolute URL including its scheme")
+		query, queryErr := url.ParseQuery(u.RawQuery)
+		rows := []Row{row("Scheme", u.Scheme), row("Host", u.Hostname()), row("Port", nonempty(u.Port(), "default"))}
+		data := map[string]any{"scheme": u.Scheme, "host": u.Hostname(), "port": u.Port(), "path": u.Path, "query": query, "fragment": u.Fragment}
+		if u.User != nil {
+			rows = append(rows, row("User", u.User.Username()))
+			data["user"] = u.User.Username()
+			if _, ok := u.User.Password(); ok {
+				const masked = "********"
+				rows = append(rows, row("Password", masked))
+				data["password"] = masked
+			}
 		}
-		rows := []Row{row("Scheme", u.Scheme), row("Host", u.Hostname()), row("Port", nonempty(u.Port(), "default")), row("Path", nonempty(u.Path, "/")), row("Fragment", u.Fragment)}
-		for _, k := range sortedKeys(u.Query()) {
-			rows = append(rows, row("Query · "+k, strings.Join(u.Query()[k], ", ")))
+		rows = append(rows, row("Path", nonempty(u.Path, "/")), row("Fragment", u.Fragment))
+		for _, k := range sortedKeys(query) {
+			rows = append(rows, row("Query · "+k, strings.Join(query[k], ", ")))
 		}
-		return Result{Title: "URL components", Sections: []Section{{Title: "COMPONENTS", Rows: rows}}, Data: map[string]any{"scheme": u.Scheme, "host": u.Hostname(), "port": u.Port(), "path": u.Path, "query": u.Query(), "fragment": u.Fragment}}, nil
+		var notes []string
+		if queryErr != nil {
+			notes = []string{"Some query parameters could not be decoded and were left out: " + queryErr.Error()}
+		}
+		return Result{Title: "URL components", Sections: []Section{{Title: "COMPONENTS", Rows: rows}}, Notes: notes, Data: data}, nil
 	default:
 		return Result{}, fmt.Errorf("mode must be encode, decode or inspect")
 	}
@@ -278,6 +295,9 @@ func jwtTool(r Request) (Result, error) {
 		token = strings.TrimSpace(token[7:])
 	}
 	parts := strings.Split(token, ".")
+	if len(parts) == 5 {
+		return Result{}, fmt.Errorf("this looks like an encrypted JWT (JWE, five segments); only signed JWTs with three segments can be decoded")
+	}
 	if len(parts) != 3 {
 		return Result{}, fmt.Errorf("expected a JWT with three dot-separated segments")
 	}
@@ -311,10 +331,10 @@ func jwtTool(r Request) (Result, error) {
 			value := t.UTC().Format(time.RFC3339)
 			switch {
 			case key == "exp" && time.Now().After(t):
-				value += " · expired " + time.Since(t).Round(time.Second).String() + " ago"
+				value += " · expired " + roughDuration(time.Since(t)) + " ago"
 				expired = true
 			case key == "exp":
-				value += " · expires in " + time.Until(t).Round(time.Second).String()
+				value += " · expires in " + roughDuration(time.Until(t))
 			case key == "nbf" && time.Now().Before(t):
 				value += " · not valid yet"
 				notYetValid = true
@@ -343,6 +363,12 @@ func jwtTool(r Request) (Result, error) {
 	}
 	return Result{Title: "JWT inspector", Summary: "Decoded locally · " + status + " · signature NOT verified", Sections: []Section{{Title: "HEADER", Text: PrettyJSON(values[0])}, {Title: "CLAIMS", Text: PrettyJSON(values[1])}, {Title: "TIMESTAMPS", Rows: rows}}, Notes: notes, Data: map[string]any{"header": values[0], "claims": claims, "status": status, "signature_verified": false}}, nil
 }
+func roughDuration(d time.Duration) string {
+	if d >= 48*time.Hour {
+		return fmt.Sprintf("%d days", int(d.Hours()/24))
+	}
+	return d.Round(time.Second).String()
+}
 func hashTool(r Request) (Result, error) {
 	return hashToolContext(context.Background(), r)
 }
@@ -357,6 +383,18 @@ func (r contextReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	return r.source.Read(p)
+}
+
+func expandHome(p string) (string, error) {
+	if p != "~" && (len(p) < 2 || p[0] != '~' || !os.IsPathSeparator(p[1])) {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("expand home directory: %w", err)
+	}
+	// Let the filesystem resolve dot segments after following symlinks.
+	return home + p[1:], nil
 }
 
 func hashToolContext(ctx context.Context, r Request) (Result, error) {
@@ -386,6 +424,10 @@ func hashToolContext(ctx context.Context, r Request) (Result, error) {
 	if p := r.Opt("file", ""); p != "" {
 		if r.Input != "" || r.InputReader != nil {
 			return Result{}, fmt.Errorf("choose text, stdin or --file as the hash source")
+		}
+		p, err := expandHome(p)
+		if err != nil {
+			return Result{}, err
 		}
 		info, err := os.Stat(p)
 		if err != nil {
@@ -520,10 +562,13 @@ func passwordTool(r Request) (Result, error) {
 	return Result{Title: "Secure passwords", Summary: fmt.Sprintf("%d characters · crypto/rand · never saved", length), Output: strings.Join(passwords, "\n"), Data: passwords}, nil
 }
 func loadZone(name string) (*time.Location, error) {
-	if name == "Local" || name == "" {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "", "local":
 		return time.Local, nil
+	case "utc":
+		return time.UTC, nil
 	}
-	loc, err := time.LoadLocation(name)
+	loc, err := time.LoadLocation(strings.TrimSpace(name))
 	if err != nil {
 		return nil, fmt.Errorf("unknown timezone %q", name)
 	}
@@ -646,7 +691,7 @@ func cronTool(r Request) (Result, error) {
 			return Result{}, fmt.Errorf("schedule has no matching dates in the next five years")
 		}
 		runs = append(runs, next.In(loc).Format(time.RFC3339))
-		table.Rows = append(table.Rows, []string{strconv.Itoa(i + 1), next.In(loc).Format("Mon 02 Jan 2006 · 15:04 MST"), next.Sub(current).String()})
+		table.Rows = append(table.Rows, []string{strconv.Itoa(i + 1), next.In(loc).Format("Mon 02 Jan 2006 · 15:04 MST"), next.Sub(current).Round(time.Second).String()})
 		current = next
 	}
 	return Result{Title: "Cron explorer", Summary: expr + " · " + loc.String(), Table: table, Data: map[string]any{"expression": expr, "timezone": loc.String(), "next_runs": runs}}, nil
@@ -755,7 +800,7 @@ func cidrTool(r Request) (Result, error) {
 		if err != nil {
 			return Result{}, fmt.Errorf("invalid IP for --contains: %w", err)
 		}
-		contains := p.Contains(ip)
+		contains := p.Contains(ip) || (addr.Is4() && p.Contains(ip.Unmap()))
 		rows = append(rows, row("Contains "+input, contains))
 		data["contains"] = contains
 	}

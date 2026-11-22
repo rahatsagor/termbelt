@@ -132,20 +132,20 @@ func (e *Engine) getJSON(ctx context.Context, address string, out any) error {
 }
 
 type IPData struct {
-	IP           string  `json:"ip"`
-	City         string  `json:"city,omitempty"`
-	Region       string  `json:"region,omitempty"`
-	Country      string  `json:"country,omitempty"`
-	CountryCode  string  `json:"country_code,omitempty"`
-	Continent    string  `json:"continent,omitempty"`
-	Latitude     float64 `json:"latitude"`
-	Longitude    float64 `json:"longitude"`
-	Timezone     string  `json:"timezone,omitempty"`
-	Postal       string  `json:"postal,omitempty"`
-	ISP          string  `json:"isp,omitempty"`
-	Organization string  `json:"organization,omitempty"`
-	ASN          string  `json:"asn,omitempty"`
-	Source       string  `json:"source"`
+	IP           string   `json:"ip"`
+	City         string   `json:"city,omitempty"`
+	Region       string   `json:"region,omitempty"`
+	Country      string   `json:"country,omitempty"`
+	CountryCode  string   `json:"country_code,omitempty"`
+	Continent    string   `json:"continent,omitempty"`
+	Latitude     *float64 `json:"latitude,omitempty"`
+	Longitude    *float64 `json:"longitude,omitempty"`
+	Timezone     string   `json:"timezone,omitempty"`
+	Postal       string   `json:"postal,omitempty"`
+	ISP          string   `json:"isp,omitempty"`
+	Organization string   `json:"organization,omitempty"`
+	ASN          string   `json:"asn,omitempty"`
+	Source       string   `json:"source"`
 }
 
 func formatASN(asn int) string {
@@ -238,7 +238,7 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 		}
 		var d struct {
 			IP, City, Region, Country, CountryCode, Continent, Timezone, Postal, ISP, Org, ASN string
-			Latitude, Longitude                                                                float64
+			Latitude, Longitude                                                                *float64
 		}
 		if err := e.getJSON(ctx, base+path, &d); err != nil {
 			return IPData{}, fmt.Errorf("configured IP API: %w", err)
@@ -252,7 +252,7 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 		IP, City, Region, Country, Continent, Postal, Message string
 		CountryCode                                           string `json:"country_code"`
 		Success                                               bool
-		Latitude, Longitude                                   float64
+		Latitude, Longitude                                   *float64
 		Timezone                                              struct{ ID string }
 		Connection                                            struct {
 			ASN      int
@@ -278,7 +278,7 @@ func (e *Engine) lookupIP(ctx context.Context, input string) (IPData, error) {
 		RegionName                                                 string `json:"regionName"`
 		CountryName                                                string `json:"countryName"`
 		IPAddr                                                     string `json:"ipAddress"`
-		Latitude, Longitude                                        float64
+		Latitude, Longitude                                        *float64
 		ASN                                                        int
 		TimeZones                                                  []string
 	}
@@ -310,7 +310,27 @@ func validateProviderIP(returned, requested string) error {
 	return nil
 }
 func ipRows(d IPData) []Row {
-	return []Row{row("IP address", d.IP), row("Location", strings.Trim(strings.Join([]string{d.City, d.Region, d.Country}, ", "), ", ")), row("ISP", nonempty(d.ISP, "not provided")), row("Organization", nonempty(d.Organization, "not provided")), row("ASN", nonempty(d.ASN, "not provided")), row("Timezone", d.Timezone), row("Coordinates", fmt.Sprintf("%.5f, %.5f", d.Latitude, d.Longitude)), row("Source", d.Source)}
+	if d.Source == "local classification" {
+		return []Row{row("IP address", d.IP), row("Classification", d.Organization), row("Source", d.Source)}
+	}
+	location := []string{}
+	for _, part := range []string{d.City, d.Region, d.Country} {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			location = append(location, trimmed)
+		}
+	}
+	coordinates := "not provided"
+	if d.Latitude != nil || d.Longitude != nil {
+		lat, lon := "not provided", "not provided"
+		if d.Latitude != nil {
+			lat = fmt.Sprintf("%.5f", *d.Latitude)
+		}
+		if d.Longitude != nil {
+			lon = fmt.Sprintf("%.5f", *d.Longitude)
+		}
+		coordinates = lat + ", " + lon
+	}
+	return []Row{row("IP address", d.IP), row("Location", strings.Join(location, ", ")), row("ISP", nonempty(d.ISP, "not provided")), row("Organization", nonempty(d.Organization, "not provided")), row("ASN", nonempty(d.ASN, "not provided")), row("Timezone", d.Timezone), row("Coordinates", coordinates), row("Source", d.Source)}
 }
 func (e *Engine) IP(ctx context.Context, r Request) (Result, error) {
 	d, err := e.lookupIP(ctx, r.Input)
@@ -452,6 +472,8 @@ func dnsResolver(custom string) (string, error) {
 // systemResolverList is replaced in tests.
 var systemResolverList = systemResolvers
 
+var dnsTimeout = 5 * time.Second
+
 // maxSystemResolvers bounds how long a lookup waits on unresponsive servers,
 // such as a VPN resolver that is gone after the network changes.
 const maxSystemResolvers = 3
@@ -530,7 +552,7 @@ func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([
 	msg := new(dns.Msg)
 	msg.SetQuestion(dns.Fqdn(host), kind)
 	msg.SetEdns0(1232, false)
-	client := &dns.Client{Timeout: 5 * time.Second}
+	client := &dns.Client{Timeout: dnsTimeout}
 	reply, _, err := client.ExchangeContext(ctx, msg, resolver)
 	if err != nil {
 		return nil, err
@@ -552,6 +574,23 @@ func queryDNS(ctx context.Context, host string, kind uint16, resolver string) ([
 		records = append(records, DNSRecord{Type: dns.TypeToString[header.Rrtype], Name: header.Name, TTL: header.Ttl, Value: value})
 	}
 	return records, nil
+}
+
+func dnsFailureSummary(notes []string) string {
+	if len(notes) > 1 {
+		_, reason, _ := strings.Cut(notes[0], ": ")
+		identical := true
+		for _, note := range notes[1:] {
+			if _, other, _ := strings.Cut(note, ": "); other != reason {
+				identical = false
+				break
+			}
+		}
+		if identical {
+			return fmt.Sprintf("%s for all %d record types", reason, len(notes))
+		}
+	}
+	return strings.Join(notes, "; ")
 }
 
 var asciiDNSName = regexp.MustCompile(`^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.?$`)
@@ -602,7 +641,7 @@ func (e *Engine) DNS(ctx context.Context, r Request) (Result, error) {
 		silent = append(silent, candidate)
 	}
 	if len(notes) == len(types) {
-		return Result{}, fmt.Errorf("DNS lookup failed: %s", strings.Join(notes, "; "))
+		return Result{}, fmt.Errorf("DNS lookup failed: %s", dnsFailureSummary(notes))
 	}
 	if len(silent) > 0 {
 		notes = append(notes, "System resolver "+strings.Join(silent, ", ")+" did not respond; used the next one.")
@@ -867,6 +906,13 @@ func hostingClues(d HTTPData, cname string, ns []string) []Row {
 
 var titlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
+func pageTitle(body string) string {
+	if match := titlePattern.FindStringSubmatch(body); len(match) > 1 {
+		return strings.Join(strings.Fields(html.UnescapeString(match[1])), " ")
+	}
+	return ""
+}
+
 func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error) {
 	host, err := hostname(r.Input)
 	if err != nil {
@@ -948,8 +994,8 @@ func (e *Engine) Site(ctx context.Context, r Request, emit Emit) (Result, error)
 			clues = append(clues, row("Technology", "No recognizable evidence exposed"))
 		}
 		sections = append(sections, Section{Title: "HOSTING & TECHNOLOGY CLUES", Rows: clues})
-		if match := titlePattern.FindStringSubmatch(httpData.Body); len(match) > 1 {
-			sections = append(sections, Section{Title: "PAGE", Rows: []Row{row("Title", html.UnescapeString(strings.TrimSpace(match[1])))}})
+		if title := pageTitle(httpData.Body); title != "" {
+			sections = append(sections, Section{Title: "PAGE", Rows: []Row{row("Title", title)}})
 		}
 		sections = append(sections, httpSections(httpData)...)
 	}

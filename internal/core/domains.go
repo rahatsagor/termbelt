@@ -265,18 +265,21 @@ func validateLabel(label string) error {
 	}
 	return nil
 }
-func domainASCII(input string) (string, error) {
-	if strings.Contains(input, "://") {
+func domainTarget(input string) (string, error) {
+	if strings.ContainsAny(input, "/:") {
 		host, err := hostname(input)
 		if err != nil {
 			return "", err
 		}
 		input = host
 	}
+	return domainASCII(input)
+}
+func domainASCII(input string) (string, error) {
 	input = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(input)), ".")
 	ascii, err := idna.Lookup.ToASCII(input)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid domain name: %w", err)
 	}
 	ascii = strings.TrimSuffix(ascii, ".")
 	if len(ascii) > 253 {
@@ -290,7 +293,7 @@ func domainASCII(input string) (string, error) {
 	return ascii, nil
 }
 func registrable(input string) (string, error) {
-	domain, err := domainASCII(input)
+	domain, err := domainTarget(input)
 	if err != nil {
 		return "", err
 	}
@@ -525,7 +528,7 @@ func (r *Registry) lookupRDAP(ctx context.Context, domain string) RDAPLookup {
 	return result
 }
 func (e *Engine) Domains(ctx context.Context, req Request, emit Emit) (Result, error) {
-	name, err := domainASCII(req.Input)
+	name, err := domainTarget(req.Input)
 	if err != nil {
 		return Result{}, err
 	}

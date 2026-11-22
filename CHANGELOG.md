@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `whois` and `domains` accept a pasted URL, a trailing slash or a port (`example.com/`, `example.com:443`), like `dns` and `tls`, instead of failing with `idna: disallowed rune U+002F`. Other invalid names now say `invalid domain name`.
+- `--zone` accepts `local` and `utc` in any letter case.
+- `ip` shows private, loopback and reserved addresses as local classifications without empty provider rows. Missing regions no longer leave an extra comma. Missing coordinates read `not provided` and are omitted from JSON; supplied zero values are shown.
+- `dns` reports one reason when every record type fails the same way (`DNS NXDOMAIN for all 8 record types`) instead of repeating it per type.
+- `url --mode inspect` shows the username, masks any supplied password, and notes query parameters it could not decode.
+- `cidr --contains` matches an IPv4-mapped IPv6 address (`::ffff:10.1.1.1`) against an IPv4 prefix.
+- `hash --file` expands a leading home-directory `~`, including `--file=~/x` and paths typed in the workbench, without changing how the filesystem resolves the rest of the path.
+- `speed` lists upload rows only when an upload was measured or attempted.
+- `site` collapses line breaks and repeated spaces in the page title.
+- `jwt` explains that a five-segment token is an encrypted JWE, and reports long expiry distances in days. `json` says `input is empty` instead of `EOF`. The first `cron` row no longer shows fractions of a second.
+- Release and package builds use Go 1.27.4, which includes security fixes to `net/http`.
+
 ## 1.3.0
 
 - `whois` and `domains` support `.cd`, `.ga`, `.kw`, `.ps`, `.sl` and the South African `co.za`, `net.za`, `org.za` and `web.za` registries, which publish no RDAP service and are missing from IANA's WHOIS list. Servers are chosen by the longest matching suffix.

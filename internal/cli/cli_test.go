@@ -98,6 +98,28 @@ func TestLineInputDropsTrailingNewline(t *testing.T) {
 	}
 }
 
+func TestURLInspectMasksPasswordInAllOutputFormats(t *testing.T) {
+	const escaped = "fixture%2Dcredential"
+	const password = "fixture-credential"
+	const base = "https://review-user:" + escaped + "@example.com"
+	for _, flag := range []string{"--plain", "--json", "--raw"} {
+		t.Run(flag[2:], func(t *testing.T) {
+			args := []string{"url", "--mode", "inspect", flag}
+			out, err := execute(t, args, base+"/\n")
+			if err != nil || !strings.Contains(out, "review-user") || !strings.Contains(out, "********") || strings.Contains(out, password) || strings.Contains(out, escaped) {
+				t.Errorf("inspection output = %q, %v; want username and masked password", out, err)
+			}
+			out, err = execute(t, args, base+":not-a-port/\n")
+			if err == nil {
+				t.Fatal("malformed URL was accepted")
+			}
+			if text := out + err.Error(); strings.Contains(text, password) || strings.Contains(text, escaped) {
+				t.Errorf("malformed URL output exposed credentials: %q", text)
+			}
+		})
+	}
+}
+
 func TestToolOptionsAreTypedFlags(t *testing.T) {
 	out, err := execute(t, []string{"password", "--length", "16", "--count", "2", "--no-symbols", "--raw"}, "")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -35,6 +36,9 @@ func TestDNSSkipsSystemResolverThatDoesNotRespond(t *testing.T) {
 	previous := systemResolverList
 	systemResolverList = func() []string { return []string{dead.LocalAddr().String(), conn.LocalAddr().String()} }
 	defer func() { systemResolverList = previous }()
+	previousTimeout := dnsTimeout
+	dnsTimeout = 300 * time.Millisecond
+	defer func() { dnsTimeout = previousTimeout }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

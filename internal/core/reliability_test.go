@@ -256,7 +256,7 @@ func FuzzDomainNormalization(f *testing.F) {
 		if len(input) > 4096 {
 			t.Skip()
 		}
-		name, err := domainASCII(input)
+		name, err := domainTarget(input)
 		if err == nil {
 			again, err := domainASCII(name)
 			if err != nil || name != again || len(name) > 253 {

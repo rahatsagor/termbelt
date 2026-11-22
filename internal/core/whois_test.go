@@ -104,3 +104,27 @@ func TestSupplementalWhoisServersCoverSuffixes(t *testing.T) {
 		t.Fatalf("lookup = %#v via %q", got, queried)
 	}
 }
+
+func TestWhoisServerRejectsNonHostReferrals(t *testing.T) {
+	for _, tc := range []struct{ referral, want string }{
+		{"whois.registry.example:43", ""},
+		{"whois.registry.example/path", ""},
+		{"https://whois.registry.example", ""},
+		{"WHOIS.Registry.Example.", "whois.registry.example"},
+	} {
+		r := &Registry{queryWhois: func(_ context.Context, server, query string) (string, error) {
+			if server != "whois.iana.org" || query != "test" {
+				t.Fatalf("unexpected WHOIS query: %s %s", server, query)
+			}
+			return "whois: " + tc.referral + "\r\n", nil
+		}}
+		got, err := r.whoisServer(context.Background(), "example.test", true)
+		if tc.want == "" {
+			if err == nil || err.Error() != "invalid WHOIS referral" || got != "" {
+				t.Errorf("referral %q = %q, %v; want invalid WHOIS referral", tc.referral, got, err)
+			}
+		} else if got != tc.want || err != nil {
+			t.Errorf("referral %q = %q, %v; want %q", tc.referral, got, err, tc.want)
+		}
+	}
+}

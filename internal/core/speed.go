@@ -379,6 +379,13 @@ func summarizeLatency(samples []float64) latencyStats {
 	}
 	return stats
 }
+func speedRows(d SpeedData) []Row {
+	rows := []Row{row("Servers", strings.Join(d.Servers, ", ")), row("Downloaded", fmt.Sprintf("%.2f MiB", float64(d.DownloadedBytes)/(1<<20))), row("Download elapsed", fmt.Sprintf("%.2f s", d.DownloadSeconds)), row("Download stopped by", d.DownloadStopReason)}
+	if d.UploadStopReason != "" {
+		rows = append(rows, row("Uploaded", fmt.Sprintf("%.2f MiB", float64(d.UploadedBytes)/(1<<20))), row("Upload elapsed", fmt.Sprintf("%.2f s", d.UploadSeconds)), row("Upload stopped by", d.UploadStopReason))
+	}
+	return rows
+}
 func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error) {
 	provider := strings.ToLower(r.Opt("provider", "fast"))
 	if provider != "fast" && provider != "cloudflare" {
@@ -453,5 +460,5 @@ func (e *Engine) Speed(ctx context.Context, r Request, emit Emit) (Result, error
 	if downloadSeconds < 2 && data.DownloadStopReason == "byte-limit" {
 		notes = append(notes, "The download reached its data limit in under two seconds; increase --max-mb for a more stable measurement.")
 	}
-	return Result{Title: "Internet speed", Summary: map[string]string{"fast": "Fast.com · Netflix CDN", "cloudflare": "Cloudflare edge network"}[provider], Metrics: metrics, Sections: []Section{{Title: "MEASUREMENT", Rows: []Row{row("Servers", strings.Join(data.Servers, ", ")), row("Downloaded", fmt.Sprintf("%.2f MiB", float64(downloaded)/(1<<20))), row("Download elapsed", fmt.Sprintf("%.2f s", downloadSeconds)), row("Download stopped by", data.DownloadStopReason), row("Uploaded", fmt.Sprintf("%.2f MiB", float64(data.UploadedBytes)/(1<<20))), row("Upload elapsed", fmt.Sprintf("%.2f s", data.UploadSeconds)), row("Upload stopped by", nonempty(data.UploadStopReason, "not measured"))}}}, Notes: notes, Data: data}, nil
+	return Result{Title: "Internet speed", Summary: map[string]string{"fast": "Fast.com · Netflix CDN", "cloudflare": "Cloudflare edge network"}[provider], Metrics: metrics, Sections: []Section{{Title: "MEASUREMENT", Rows: speedRows(data)}}, Notes: notes, Data: data}, nil
 }

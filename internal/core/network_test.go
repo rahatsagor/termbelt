@@ -134,6 +134,35 @@ func TestDomainInputValidationAndIDN(t *testing.T) {
 		t.Fatalf("registrable = %q, %v", root, err)
 	}
 }
+
+func TestDomainsParseLookupTargetButRejectURLSyntaxInTLDs(t *testing.T) {
+	calls := 0
+	r := registryFor(t, func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.URL.Path != "/rdap/domain/example.com" {
+			t.Errorf("lookup path = %q", req.URL.Path)
+		}
+		return response(req, 404, `{"errorCode":404}`), nil
+	})
+	r.endpoints["com"] = []string{"https://registry.test/rdap"}
+	e := &Engine{RDAP: r}
+	ctx := context.Background()
+	for _, suffix := range []string{"com/path", "com:443", "https://com"} {
+		_, err := e.Domains(ctx, Request{Input: "example", Options: map[string]string{"tlds": suffix}}, nil)
+		if err == nil || !strings.HasPrefix(err.Error(), "invalid TLD:") {
+			t.Errorf("--tlds=%s error = %v, want invalid TLD", suffix, err)
+		}
+	}
+	if calls != 0 {
+		t.Errorf("invalid TLDs triggered %d lookups", calls)
+	}
+	if _, err := e.Domains(ctx, Request{Input: "https://example.com:443/path"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("want one lookup for the URL target, got %d", calls)
+	}
+}
 func TestPrivateIPNeverCallsProvider(t *testing.T) {
 	e := NewEngine(Config{TimeoutSeconds: 20})
 	e.Client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -182,6 +211,49 @@ func TestHTTPSFallbackMapsProviderFields(t *testing.T) {
 	d, err := e.lookupIP(context.Background(), "8.8.8.8")
 	if err != nil || d.City != "Mountain View" || d.ASN != "AS15169" {
 		t.Fatalf("fallback %#v, %v", d, err)
+	}
+}
+func TestIPProviderCoordinatePresence(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, apiURL, body, coordinates, lat, lon string
+	}{
+		{"explicit zeros", "ipwho.is", "", `{"success":true,"ip":"8.8.8.8","latitude":0,"longitude":0}`, "0.00000, 0.00000", "0", "0"},
+		{"latitude only", "custom.test", "https://custom.test", `{"ip":"8.8.8.8","latitude":23.5}`, "23.50000, not provided", "23.5", ""},
+		{"longitude only after fallback", "free.freeipapi.com", "", `{"ipAddress":"8.8.8.8","longitude":90.25}`, "not provided, 90.25000", "", "90.25"},
+		{"missing and null", "ipwho.is", "", `{"success":true,"ip":"8.8.8.8","latitude":null}`, "not provided", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewEngine(Config{TimeoutSeconds: 20, IPAPIURL: tc.apiURL})
+			e.Client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Host == "ipwho.is" && tc.host == "free.freeipapi.com" {
+					return response(req, 429, `{"success":false}`), nil
+				}
+				if req.URL.Host != tc.host {
+					t.Fatalf("unexpected provider %q, want %q", req.URL.Host, tc.host)
+				}
+				return response(req, 200, tc.body), nil
+			})
+			result, err := e.IP(context.Background(), Request{Input: "8.8.8.8"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var coordinates string
+			for _, r := range result.Sections[0].Rows {
+				if r.Label == "Coordinates" {
+					coordinates = r.Value
+				}
+			}
+			if coordinates != tc.coordinates {
+				t.Errorf("coordinates row = %q, want %q", coordinates, tc.coordinates)
+			}
+			var data map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(PrettyJSON(result.Data)), &data); err != nil {
+				t.Fatal(err)
+			}
+			if lat, lon := string(data["latitude"]), string(data["longitude"]); lat != tc.lat || lon != tc.lon {
+				t.Errorf("structured latitude, longitude = %q, %q; want %q, %q", lat, lon, tc.lat, tc.lon)
+			}
+		})
 	}
 }
 func TestHTTPInspectsRedirectsAndCapsBody(t *testing.T) {
