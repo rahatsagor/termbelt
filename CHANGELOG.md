@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.3.1
 
 - `whois` and `domains` accept a pasted URL, a trailing slash or a port (`example.com/`, `example.com:443`), like `dns` and `tls`, instead of failing with `idna: disallowed rune U+002F`. Other invalid names now say `invalid domain name`.
 - `--zone` accepts `local` and `utc` in any letter case.
